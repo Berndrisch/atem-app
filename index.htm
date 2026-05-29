@@ -503,6 +503,13 @@
     <div id="settings-panel">
       <div class="handle"></div>
       <div class="section">
+        <div class="sec-label">Szene</div>
+        <div class="pill-row" id="scene-toggle">
+          <button class="pill on" data-val="hills">🏔 Hügel</button>
+          <button class="pill" data-val="buddha">🧘 Buddha</button>
+        </div>
+      </div>
+      <div class="section">
         <div class="sec-label">Atemtechnik</div>
         <div class="pill-row" id="presets"></div>
       </div>
@@ -521,8 +528,9 @@
       <div class="section">
         <div class="sec-label">Klangart</div>
         <div class="pill-row" id="sound-type-toggle">
-          <button class="pill on" data-val="cello">Cello</button>
+          <button class="pill" data-val="cello">Cello</button>
           <button class="pill" data-val="bowl">Klangschale</button>
+          <button class="pill on" data-val="piano">Klavier</button>
         </div>
         <div class="sl-row" style="margin-top: 12px">
           <span class="sl-name">Schalen-Pitch</span>
@@ -636,7 +644,7 @@
       breaths: 0,
       ts: null,
       pitchShift: 0,
-      soundType: 'cello', // NEU: 'cello' oder 'bowl'
+      soundType: 'piano', // 'cello', 'bowl' oder 'piano'
       drone: false, // NEU: Steuert das Grundbrummen (Standard: aus)
       ping: false,  // NEU: Triangel-Ping am Hochpunkt
       pingPitch: 0, // NEU: Tonhöhe für den Ping
@@ -647,6 +655,7 @@
       cLine: '#ffffff',
       cHill: '#7ec850',
       cSky: '#a8c8e8',
+      scene: 'hills', // 'hills' oder 'buddha'
     };
 
     // ═══════════════════════════════════════
@@ -839,6 +848,79 @@
         });
       },
 
+      playPiano(phase, duration) {
+        if (!this.initialized || !this.active) return;
+        const ctx = this.ctx;
+        const now = ctx.currentTime;
+
+        // Pitch-Shift anwenden
+        const shiftFactor = Math.pow(2, S.pitchShift / 12);
+
+        // Langsames Ausklingen: 1.8× Phasendauer, klingt sanft in die nächste Phase nach
+        const decayTime = duration * 1.8;
+
+        let baseFrequencies, resonanceFrequencies;
+
+        if (phase === 'inhale') {
+          // EINATMEN: G-Moll7 – schwebend, sehnsuchtsvoll, kristallin
+          baseFrequencies = [392.00, 466.16, 587.33, 698.46, 783.99]; // G4, Bb4, D5, F5, G5
+          // Breite Resonanz im Oberspektrum
+          resonanceFrequencies = [932.33, 1174.66, 1567.98, 1864.66]; // Bb5, D6, G6, Bb6
+        } else {
+          // AUSATMEN: Fis-Moll7 – warm, melancholisch, geborgen
+          baseFrequencies = [369.99, 440.00, 554.37, 659.25, 739.99]; // F#4, A4, C#5, E5, F#5
+          // Sympathische Saiten schwingen mit
+          resonanceFrequencies = [880.00, 1108.73, 1479.98, 1760.00]; // A5, C#6, F#6, A6
+        }
+
+        // Master Gain – sanftes, langsames Ausklingen
+        const pianoMaster = ctx.createGain();
+        pianoMaster.gain.setValueAtTime(0.35, now);
+        pianoMaster.gain.exponentialRampToValueAtTime(0.001, now + decayTime);
+        pianoMaster.connect(this.masterGain);
+
+        // 1. Hauptakkord (Triangle für Wärme)
+        baseFrequencies.forEach(f => {
+          const osc = ctx.createOscillator();
+          const gainNode = ctx.createGain();
+          osc.type = 'triangle';
+          osc.frequency.setValueAtTime(f * shiftFactor, now);
+          gainNode.gain.setValueAtTime(0.15, now);
+          osc.connect(gainNode);
+          gainNode.connect(pianoMaster);
+          osc.start(now);
+          osc.stop(now + decayTime + 0.1);
+        });
+
+        // 2. Leicht verstimmte Kopie für Chorus-Schwebung (vielfältigerer Klang)
+        baseFrequencies.forEach(f => {
+          const osc = ctx.createOscillator();
+          const gainNode = ctx.createGain();
+          osc.type = 'sine';
+          // +1.5 Hz Verstimmung erzeugt langsame Schwebung wie bei echten Saiten
+          osc.frequency.setValueAtTime((f * shiftFactor) + 1.5, now);
+          gainNode.gain.setValueAtTime(0.04, now);
+          osc.connect(gainNode);
+          gainNode.connect(pianoMaster);
+          osc.start(now);
+          osc.stop(now + decayTime + 0.1);
+        });
+
+        // 3. Sympathische Resonanz (Sine für silbriges Glitzern)
+        resonanceFrequencies.forEach(f => {
+          const osc = ctx.createOscillator();
+          const gainNode = ctx.createGain();
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(f * shiftFactor, now);
+          // Extrem leise – nur als Hauch hörbar
+          gainNode.gain.setValueAtTime(0.02, now);
+          osc.connect(gainNode);
+          gainNode.connect(pianoMaster);
+          osc.start(now);
+          osc.stop(now + decayTime + 0.1);
+        });
+      },
+
       playPing(pitchOffset = 0) {
         if (!this.initialized || !this.active) return;
         const ctx = this.ctx;
@@ -942,8 +1024,7 @@
 
     // ─ Y auf der Kurve ──────────────────────
     function curveY(x) {
-      const cd = S.phases.reduce((a, p) => a + p.duration, 0);
-      const pps = W / (2 * cd);
+      const pps = W / 20; // Konstante horizontale Geschwindigkeit
       const bx = W * 0.30;
       const td = (x - bx) / pps;
       const val = breathVal(S.bt + td);
@@ -993,6 +1074,311 @@
       ctx.lineWidth = 3;
       ctx.shadowBlur = 0;
       ctx.stroke();
+    }
+
+    // ═══════════════════════════════════════
+    //  BUDDHA-SZENE – Teletubby-Land
+    // ═══════════════════════════════════════
+    function drawBuddhaScene() {
+      const bv = breathVal(S.bt);
+      drawBuddhaSky();
+      drawTeletubbyHills();
+      drawWindmill();
+      drawBuddhaTree();
+      drawBuddhaFigure(bv);
+      drawSun();
+      drawBuddhaBreathText(bv);
+    }
+
+    function drawBuddhaSky() {
+      const grad = ctx.createLinearGradient(0, 0, 0, H);
+      grad.addColorStop(0, '#7EC8E8');
+      grad.addColorStop(0.45, '#B8E4F0');
+      grad.addColorStop(0.7, '#D4EFBA');
+      grad.addColorStop(1, '#A8D86E');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, W, H);
+
+      // Kleine Wölkchen
+      ctx.fillStyle = 'rgba(255,255,255,0.6)';
+      [[W*0.15, H*0.12, 40], [W*0.55, H*0.08, 55], [W*0.82, H*0.15, 35]].forEach(([cx, cy, r]) => {
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, 0, Math.PI*2);
+        ctx.arc(cx+r*0.7, cy-r*0.15, r*0.7, 0, Math.PI*2);
+        ctx.arc(cx-r*0.6, cy+r*0.1, r*0.65, 0, Math.PI*2);
+        ctx.arc(cx+r*0.2, cy-r*0.35, r*0.55, 0, Math.PI*2);
+        ctx.fill();
+      });
+    }
+
+    function drawTeletubbyHills() {
+      const hills = [
+        { x: W*0.12, y: H*0.62, rx: W*0.42, ry: H*0.18, c: '#5AAF38' },
+        { x: W*0.80, y: H*0.60, rx: W*0.40, ry: H*0.20, c: '#4DA030' },
+        { x: W*0.48, y: H*0.66, rx: W*0.50, ry: H*0.22, c: '#68C04A' },
+        { x: W*0.05, y: H*0.78, rx: W*0.38, ry: H*0.18, c: '#7ACC5C' },
+        { x: W*0.70, y: H*0.80, rx: W*0.45, ry: H*0.20, c: '#72C854' },
+        { x: W*0.38, y: H*0.84, rx: W*0.55, ry: H*0.22, c: '#82D466' },
+      ];
+      hills.forEach(h => {
+        ctx.beginPath();
+        ctx.ellipse(h.x, h.y, h.rx, h.ry, 0, Math.PI, 0);
+        ctx.lineTo(h.x+h.rx, H);
+        ctx.lineTo(h.x-h.rx, H);
+        ctx.closePath();
+        ctx.fillStyle = h.c;
+        ctx.fill();
+      });
+
+      // Grüner Boden
+      ctx.fillStyle = '#82D466';
+      ctx.fillRect(0, H*0.88, W, H*0.12);
+
+      // Kleine Blümchen
+      const flowerColors = ['#FFE066','#FF8FA3','#FFB347','#E8A0F0','#FFFFFF'];
+      [[W*0.08,H*0.82],[W*0.22,H*0.86],[W*0.35,H*0.89],[W*0.62,H*0.87],
+       [W*0.78,H*0.84],[W*0.90,H*0.88],[W*0.50,H*0.91],[W*0.15,H*0.90]].forEach(([fx,fy],i) => {
+        const fc = flowerColors[i % flowerColors.length];
+        const fr = 3 + (i%3);
+        ctx.fillStyle = fc;
+        for(let p=0; p<5; p++) {
+          const a = (p/5)*Math.PI*2;
+          ctx.beginPath();
+          ctx.arc(fx+Math.cos(a)*fr*1.2, fy+Math.sin(a)*fr*1.2, fr, 0, Math.PI*2);
+          ctx.fill();
+        }
+        ctx.fillStyle = '#FFD700';
+        ctx.beginPath();
+        ctx.arc(fx, fy, fr*0.6, 0, Math.PI*2);
+        ctx.fill();
+      });
+    }
+
+    function drawWindmill() {
+      const mx = W*0.16;
+      const hillY = H*0.62;
+      const towerH = H*0.18;
+      const topY = hillY - towerH;
+
+      // Turm
+      ctx.beginPath();
+      ctx.moveTo(mx-7, hillY);
+      ctx.lineTo(mx+7, hillY);
+      ctx.lineTo(mx+4, topY);
+      ctx.lineTo(mx-4, topY);
+      ctx.closePath();
+      ctx.fillStyle = '#8B6F47';
+      ctx.fill();
+      ctx.strokeStyle = '#6B4F27';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      // Dach
+      ctx.beginPath();
+      ctx.moveTo(mx-8, topY);
+      ctx.lineTo(mx, topY-12);
+      ctx.lineTo(mx+8, topY);
+      ctx.closePath();
+      ctx.fillStyle = '#C0392B';
+      ctx.fill();
+
+      // Flügel – langsam drehend
+      const bladeLen = H*0.10;
+      const rotation = S.sesTime * 0.15;
+      ctx.save();
+      ctx.translate(mx, topY);
+      ctx.rotate(rotation);
+      for (let i=0; i<4; i++) {
+        ctx.save();
+        ctx.rotate(i * Math.PI/2);
+        // Flügelrahmen
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(-4, -bladeLen*0.15);
+        ctx.lineTo(-5, -bladeLen);
+        ctx.lineTo(2, -bladeLen*0.95);
+        ctx.lineTo(3, -bladeLen*0.1);
+        ctx.closePath();
+        ctx.fillStyle = 'rgba(255,255,255,0.88)';
+        ctx.fill();
+        ctx.strokeStyle = '#BBA880';
+        ctx.lineWidth = 0.5;
+        ctx.stroke();
+        // Querlatten
+        ctx.strokeStyle = 'rgba(139,111,71,0.4)';
+        ctx.lineWidth = 0.8;
+        for(let j=1; j<4; j++) {
+          const ly = -bladeLen*j*0.25;
+          ctx.beginPath();
+          ctx.moveTo(-4.5, ly); ctx.lineTo(2.5, ly);
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
+      // Nabe
+      ctx.beginPath();
+      ctx.arc(0, 0, 4, 0, Math.PI*2);
+      ctx.fillStyle = '#5a4020';
+      ctx.fill();
+      ctx.restore();
+    }
+
+    function drawBuddhaTree() {
+      const tx = W*0.58;
+      const groundY = H*0.78;
+      const trunkH = H*0.28;
+      const topY = groundY - trunkH;
+
+      // Stamm
+      ctx.fillStyle = '#6B4423';
+      ctx.beginPath();
+      ctx.moveTo(tx-10, groundY);
+      ctx.quadraticCurveTo(tx-12, groundY-trunkH*0.5, tx-6, topY+20);
+      ctx.lineTo(tx+6, topY+20);
+      ctx.quadraticCurveTo(tx+12, groundY-trunkH*0.5, tx+10, groundY);
+      ctx.closePath();
+      ctx.fill();
+
+      // Wurzeln
+      ctx.strokeStyle = '#5a3418';
+      ctx.lineWidth = 3;
+      ctx.lineCap = 'round';
+      [[-1, -18, -25, 8], [1, 16, 22, 6]].forEach(([s, cx, ex, ey]) => {
+        ctx.beginPath();
+        ctx.moveTo(tx+s*8, groundY);
+        ctx.quadraticCurveTo(tx+cx, groundY+ey, tx+ex, groundY+4);
+        ctx.stroke();
+      });
+
+      // Krone – geschichtete Kreise (Bodhi-Baum-Stil)
+      const cr = W*0.12;
+      const layers = [
+        [0, -cr*0.5, cr*0.9, '#2D7A1E'],
+        [-cr*0.55, -cr*0.1, cr*0.7, '#3A8F28'],
+        [cr*0.55, -cr*0.1, cr*0.7, '#358A25'],
+        [0, -cr*1.0, cr*0.7, '#3A8F28'],
+        [-cr*0.4, -cr*0.85, cr*0.6, '#45A030'],
+        [cr*0.4, -cr*0.85, cr*0.6, '#40982C'],
+        [0, -cr*1.35, cr*0.5, '#4DAA35'],
+      ];
+      layers.forEach(([ox, oy, r, c]) => {
+        ctx.beginPath();
+        ctx.arc(tx+ox, topY+oy, r, 0, Math.PI*2);
+        ctx.fillStyle = c;
+        ctx.fill();
+      });
+    }
+
+    function drawBuddhaFigure(bv) {
+      const bx = W*0.56;
+      const groundY = H*0.78;
+      const sc = Math.min(W, H) / 420;
+      const bellyExpand = bv * 14 * sc;
+
+      ctx.save();
+      ctx.translate(bx, groundY);
+
+      // Schatten
+      ctx.beginPath();
+      ctx.ellipse(0, 4*sc, 45*sc, 8*sc, 0, 0, Math.PI*2);
+      ctx.fillStyle = 'rgba(0,0,0,0.10)';
+      ctx.fill();
+
+      // Beine (gekreuzt)
+      ctx.beginPath();
+      ctx.ellipse(0, -10*sc, 42*sc, 14*sc, 0, 0, Math.PI*2);
+      ctx.fillStyle = '#E8A317';
+      ctx.fill();
+
+      // Körper/Torso mit atmendem Bauch
+      ctx.beginPath();
+      ctx.ellipse(0, -48*sc, (34+bellyExpand)*sc, 40*sc, 0, 0, Math.PI*2);
+      ctx.fillStyle = '#F0B830';
+      ctx.fill();
+
+      // Bauch-Highlight (atmet mit)
+      ctx.beginPath();
+      ctx.ellipse(0, -40*sc, (24+bellyExpand*0.8)*sc, 28*sc, 0, 0, Math.PI*2);
+      ctx.fillStyle = '#F5CC50';
+      ctx.fill();
+
+      // Arme (auf den Knien ruhend)
+      ctx.strokeStyle = '#E8A317';
+      ctx.lineWidth = 9*sc;
+      ctx.lineCap = 'round';
+      // Links
+      ctx.beginPath();
+      ctx.moveTo(-30*sc, -45*sc);
+      ctx.quadraticCurveTo(-42*sc, -25*sc, -36*sc, -10*sc);
+      ctx.stroke();
+      // Rechts
+      ctx.beginPath();
+      ctx.moveTo(30*sc, -45*sc);
+      ctx.quadraticCurveTo(42*sc, -25*sc, 36*sc, -10*sc);
+      ctx.stroke();
+
+      // Kopf
+      const headR = 24*sc;
+      const headY = -88*sc;
+      ctx.beginPath();
+      ctx.arc(0, headY, headR, 0, Math.PI*2);
+      ctx.fillStyle = '#F0B830';
+      ctx.fill();
+
+      // Ohren (lange Buddha-Ohren)
+      [[-1,1],[1,1]].forEach(([s]) => {
+        ctx.beginPath();
+        ctx.ellipse(s*headR*0.9, headY+headR*0.2, 5*sc, 12*sc, s*0.2, 0, Math.PI*2);
+        ctx.fillStyle = '#E8A317';
+        ctx.fill();
+      });
+
+      // Haarknolle (Ushnisha)
+      ctx.beginPath();
+      ctx.arc(0, headY-headR*0.85, headR*0.35, 0, Math.PI*2);
+      ctx.fillStyle = '#2C3E50';
+      ctx.fill();
+
+      // Augen (friedlich geschlossen)
+      ctx.strokeStyle = '#654321';
+      ctx.lineWidth = 1.8*sc;
+      ctx.lineCap = 'round';
+      const eyeY = headY - 2*sc;
+      const eyeX = headR*0.32;
+      [-1, 1].forEach(s => {
+        ctx.beginPath();
+        ctx.arc(s*eyeX, eyeY, headR*0.13, 0.15*Math.PI, 0.85*Math.PI);
+        ctx.stroke();
+      });
+
+      // Lächeln
+      ctx.beginPath();
+      ctx.arc(0, headY + headR*0.2, headR*0.28, 0.1*Math.PI, 0.9*Math.PI);
+      ctx.stroke();
+
+      // Punkt auf der Stirn (Urna)
+      ctx.beginPath();
+      ctx.arc(0, headY - headR*0.35, 2.5*sc, 0, Math.PI*2);
+      ctx.fillStyle = '#C0392B';
+      ctx.fill();
+
+      ctx.restore();
+    }
+
+    function drawBuddhaBreathText(bv) {
+      const bx = W*0.56;
+      const ph = currentPhase(S.bt);
+      const labels = { inhale: 'Einatmen', exhale: 'Ausatmen', hold_top: 'Halten', hold_bottom: 'Halten' };
+      const txt = labels[ph] || '';
+
+      ctx.save();
+      ctx.font = '300 18px Quicksand';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      ctx.shadowColor = 'rgba(0,0,0,0.25)'; ctx.shadowBlur = 8;
+      ctx.fillStyle = 'rgba(255,255,255,0.92)';
+      ctx.fillText(txt, bx, H*0.55);
+      ctx.restore();
     }
 
     function drawCurve() {
@@ -1108,7 +1494,7 @@
 
         const ph = S.phases;
         const total = ph.reduce((a, p) => a + p.duration, 0);
-        const spd = W / (2 * total);
+        const spd = W / 20; // Konstante horizontale Geschwindigkeit
         const r = Math.max(18, Math.min(28, W * 0.048));
         S.rot += spd * dt / r;
 
@@ -1138,6 +1524,10 @@
           // Klangschale am Start des Zyklus (Einatmen beginnt)
           if (S.soundType === 'bowl' && currentPhaseObj.phase === 'inhale') {
             Audio.playBowl();
+          }
+          // Klavier: hoher Ton beim Einatmen, tiefer Ton beim Ausatmen
+          if (S.soundType === 'piano' && (currentPhaseObj.phase === 'inhale' || currentPhaseObj.phase === 'exhale')) {
+            Audio.playPiano(currentPhaseObj.phase, currentPhaseObj.duration);
           }
 
           S.lastPhase = currentPhaseObj.phase;
@@ -1178,17 +1568,21 @@
         if (S.soundType === 'cello') {
           Audio.update(volSwell, targetFreq);
         } else {
-          Audio.update(0, targetFreq); // Stumm schalten
+          Audio.update(0, targetFreq); // Cello stumm schalten bei Bowl/Piano
         }
       }
 
       ctx.clearRect(0, 0, W, H);
-      drawBg();
-      drawSun();
-      drawHills();
-      drawCurve();
-      drawBall();
-      drawBreathText();
+      if (S.scene === 'buddha') {
+        drawBuddhaScene();
+      } else {
+        drawBg();
+        drawSun();
+        drawHills();
+        drawCurve();
+        drawBall();
+        drawBreathText();
+      }
     }
 
     // ─ Resize ──────────────────────────────
@@ -1202,6 +1596,16 @@
     resize();
     window.addEventListener('resize', resize);
 
+
+    // Scene-Toggle Buttons
+    const sceneBtns = document.querySelectorAll('#scene-toggle .pill');
+    sceneBtns.forEach(btn => {
+      btn.addEventListener('click', () => {
+        sceneBtns.forEach(b => b.classList.remove('on'));
+        btn.classList.add('on');
+        S.scene = btn.dataset.val;
+      });
+    });
 
     // Drone-Toggle Buttons
     const droneBtns = document.querySelectorAll('#drone-toggle .pill');
