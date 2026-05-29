@@ -484,10 +484,131 @@
         opacity: 0
       }
     }
+
+    /* Landing Page */
+    #landing {
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(160deg, #a8c8e8 0%, #c8e6c0 35%, #e8f0d8 65%, #d4e8c0 100%);
+      transition: opacity 1.2s ease, transform 1.2s ease;
+    }
+
+    #landing.fade-out {
+      opacity: 0;
+      transform: scale(1.05);
+      pointer-events: none;
+    }
+
+    .landing-title {
+      font-size: clamp(64px, 18vw, 140px);
+      font-weight: 300;
+      color: #3a6a2a;
+      letter-spacing: 0.25em;
+      margin-bottom: 28px;
+      opacity: 0;
+      animation: landFadeIn 2.5s ease forwards;
+      text-shadow: 0 2px 20px rgba(58, 106, 42, 0.15);
+    }
+
+    .landing-sub {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 48px;
+    }
+
+    .landing-word {
+      font-size: clamp(16px, 4.5vw, 24px);
+      font-weight: 400;
+      color: #5a8a4a;
+      letter-spacing: 0.18em;
+      opacity: 0;
+    }
+
+    .landing-word:nth-child(1) { animation: landFadeIn 2s 1.5s ease forwards; }
+    .landing-word:nth-child(3) { animation: landFadeIn 2s 2.5s ease forwards; }
+    .landing-word:nth-child(5) { animation: landFadeIn 2s 3.5s ease forwards; }
+
+    .landing-line {
+      width: 40px;
+      height: 1px;
+      background: #8ab87a;
+      margin: 6px 0;
+      opacity: 0;
+    }
+
+    .landing-line:nth-child(2) { animation: landFadeIn 1.5s 2.0s ease forwards; }
+    .landing-line:nth-child(4) { animation: landFadeIn 1.5s 3.0s ease forwards; }
+
+    .landing-start {
+      padding: 14px 42px;
+      border-radius: 50px;
+      border: 2px solid rgba(126, 200, 80, 0.6);
+      background: rgba(255, 255, 255, 0.45);
+      backdrop-filter: blur(8px);
+      color: #3a6a2a;
+      font-family: 'Quicksand', sans-serif;
+      font-size: 16px;
+      font-weight: 500;
+      letter-spacing: 0.12em;
+      cursor: pointer;
+      opacity: 0;
+      animation: landFadeIn 2s 5.0s ease forwards;
+      transition: background 0.3s, transform 0.2s, box-shadow 0.3s;
+    }
+
+    .landing-start:hover {
+      background: rgba(126, 200, 80, 0.3);
+      box-shadow: 0 4px 20px rgba(126, 200, 80, 0.25);
+    }
+
+    .landing-start:active {
+      transform: scale(0.95);
+    }
+
+    @keyframes landFadeIn {
+      from { opacity: 0; transform: translateY(12px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .landing-leaf {
+      position: absolute;
+      font-size: 24px;
+      opacity: 0.15;
+      animation: leafFloat 8s ease-in-out infinite;
+    }
+
+    @keyframes leafFloat {
+      0%, 100% { transform: translateY(0) rotate(0deg); }
+      50% { transform: translateY(-15px) rotate(8deg); }
+    }
   </style>
 </head>
 
 <body>
+  <!-- Landing Page -->
+  <div id="landing">
+    <div class="landing-leaf" style="top:15%;left:12%">🌿</div>
+    <div class="landing-leaf" style="top:22%;right:15%;animation-delay:2s">🍃</div>
+    <div class="landing-leaf" style="bottom:20%;left:18%;animation-delay:4s">🌱</div>
+    <div class="landing-leaf" style="bottom:28%;right:12%;animation-delay:6s">🌿</div>
+    <div class="landing-title">EVA</div>
+    <div class="landing-sub">
+      <span class="landing-word">Einatmen</span>
+      <div class="landing-line"></div>
+      <span class="landing-word">Verweilen</span>
+      <div class="landing-line"></div>
+      <span class="landing-word">Ausatmen</span>
+    </div>
+    <button class="landing-start" id="landing-start">Beginnen</button>
+  </div>
+
   <canvas id="c"></canvas>
   <div id="ui">
     <div id="week-bar">
@@ -989,6 +1110,13 @@
       isMuted = !isMuted;
       btnSound.textContent = isMuted ? '🔇' : '🔊';
       if (Audio.initialized) Audio.setVolume(isMuted ? 0 : 0.6);
+    });
+
+    // ─ Landing Page ─────────────────────────
+    document.getElementById('landing-start').addEventListener('click', () => {
+      const landing = document.getElementById('landing');
+      landing.classList.add('fade-out');
+      setTimeout(() => landing.style.display = 'none', 1300);
     });
 
     // ─ Easing ──────────────────────────────
