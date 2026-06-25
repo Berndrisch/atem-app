@@ -131,7 +131,7 @@
     /* Start button */
     #start-btn {
       position: absolute;
-      bottom: 90px;
+      bottom: 50px;
       left: 50%;
       transform: translateX(-50%);
       width: 68px;
@@ -983,15 +983,15 @@
         let baseFrequencies, resonanceFrequencies;
 
         if (phase === 'inhale') {
-          // EINATMEN: G-Moll7 – schwebend, sehnsuchtsvoll, kristallin
-          baseFrequencies = [392.00, 466.16, 587.33, 698.46, 783.99]; // G4, Bb4, D5, F5, G5
+          // EINATMEN: A-Moll7 – schwebend, sehnsuchtsvoll, kristallin
+          baseFrequencies = [440.00, 523.25, 659.25, 783.99, 880.00]; // A4, C5, E5, G5, A5
           // Breite Resonanz im Oberspektrum
-          resonanceFrequencies = [932.33, 1174.66, 1567.98, 1864.66]; // Bb5, D6, G6, Bb6
+          resonanceFrequencies = [1046.50, 1318.51, 1760.00, 2093.00]; // C6, E6, A6, C7
         } else {
-          // AUSATMEN: Fis-Moll7 – warm, melancholisch, geborgen
-          baseFrequencies = [369.99, 440.00, 554.37, 659.25, 739.99]; // F#4, A4, C#5, E5, F#5
+          // AUSATMEN: G-Moll7 – warm, melancholisch, geborgen
+          baseFrequencies = [392.00, 466.16, 587.33, 698.46, 783.99]; // G4, Bb4, D5, F5, G5
           // Sympathische Saiten schwingen mit
-          resonanceFrequencies = [880.00, 1108.73, 1479.98, 1760.00]; // A5, C#6, F#6, A6
+          resonanceFrequencies = [932.33, 1174.66, 1567.98, 1864.66]; // Bb5, D6, G6, Bb6
         }
 
         // Master Gain – sanftes, langsames Ausklingen
@@ -1401,7 +1401,7 @@
       const bx = W*0.56;
       const groundY = H*0.78;
       const sc = Math.min(W, H) / 420;
-      const bellyExpand = bv * 14 * sc;
+      const bellyExpand = bv * 28 * sc;
 
       ctx.save();
       ctx.translate(bx, groundY);
