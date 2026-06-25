@@ -973,154 +973,97 @@
         if (!this.initialized || !this.active) return;
         const ctx = this.ctx;
         const now = ctx.currentTime;
-
-        // Pitch-Shift anwenden
         const shiftFactor = Math.pow(2, S.pitchShift / 12);
-
-        // Langsames Ausklingen: 1.8× Phasendauer
         const decayTime = duration * 1.8;
+        const sr = ctx.sampleRate;
+        const bufLen = Math.ceil(sr * Math.min(decayTime + 0.2, 12));
 
-        let baseFrequencies, resonanceFrequencies;
-
+        let baseFrequencies;
         if (phase === 'inhale') {
-          // EINATMEN: A-Moll7 – schwebend, sehnsuchtsvoll
-          baseFrequencies = [440.00, 523.25, 659.25, 783.99, 880.00]; // A4, C5, E5, G5, A5
-          resonanceFrequencies = [1046.50, 1318.51, 1760.00, 2093.00]; // C6, E6, A6, C7
+          // EINATMEN: A-Moll7
+          baseFrequencies = [440.00, 523.25, 659.25, 783.99, 880.00];
         } else {
-          // AUSATMEN: G-Moll7 – warm, melancholisch
-          baseFrequencies = [392.00, 466.16, 587.33, 698.46, 783.99]; // G4, Bb4, D5, F5, G5
-          resonanceFrequencies = [932.33, 1174.66, 1567.98, 1864.66]; // Bb5, D6, G6, Bb6
+          // AUSATMEN: G-Moll7
+          baseFrequencies = [392.00, 466.16, 587.33, 698.46, 783.99];
         }
 
-        // ─── Master-Bus mit Flügel-EQ ───────────────────
-        const pianoMaster = ctx.createGain();
-        pianoMaster.gain.setValueAtTime(0.45, now);
-        pianoMaster.gain.exponentialRampToValueAtTime(0.001, now + decayTime);
+        // ─── Stereo-Buffer berechnen (Sample für Sample) ──
+        const buffer = ctx.createBuffer(2, bufLen, sr);
+        const L = buffer.getChannelData(0);
+        const R = buffer.getChannelData(1);
 
-        // Resonanzkörper-Filter (Flügel-Soundboard-Wärme)
+        // Inharmonizitätskoeffizient (Saitensteifigkeit eines echten Flügels)
+        const B = 0.0003;
+        const TAU = 6.283185;
+
+        baseFrequencies.forEach((f, noteIdx) => {
+          const freq = f * shiftFactor;
+          // Stereo-Position: Tiefe Noten links, hohe rechts (wie echter Flügel)
+          const pan = noteIdx / (baseFrequencies.length - 1); // 0..1
+
+          // 10 Obertöne mit physikalisch korrekter Inharmonizität
+          for (let h = 1; h <= 10; h++) {
+            // Echte Klaviersaiten: Obertöne sind leicht zu hoch (Steifigkeit)
+            const partialFreq = freq * h * Math.sqrt(1 + B * h * h);
+
+            // Amplitude fällt mit Obertonummer ab (Flügel-Charakteristik)
+            const amp = 0.10 / Math.pow(h, 0.72) / baseFrequencies.length;
+
+            // Jeder Oberton hat seine eigene Abklingrate (höhere klingen schneller ab)
+            const partialDecay = (3.5 / decayTime) * (1 + h * 0.18);
+
+            // Zufällige Phase – DAS verhindert den elektronischen Klang
+            const phi = Math.random() * TAU;
+            const omega = TAU * partialFreq / sr;
+
+            // Hammer-Attacke: höhere Obertöne kommen schneller (Brillanz beim Anschlag)
+            const attackSpeed = 40 + h * 15;
+
+            for (let i = 0; i < bufLen; i++) {
+              const t = i / sr;
+              const env = Math.exp(-partialDecay * t) * (1 - Math.exp(-t * attackSpeed));
+              if (env < 0.00005) break; // Optimierung: unhörbare Samples überspringen
+              const s = Math.sin(omega * i + phi) * amp * env;
+              L[i] += s * (1.0 - pan * 0.35);
+              R[i] += s * (0.65 + pan * 0.35);
+            }
+          }
+
+          // Hammer-Geräusch pro Note (Filz auf Saite)
+          const noiseLen = Math.min(Math.ceil(sr * 0.025), bufLen);
+          for (let i = 0; i < noiseLen; i++) {
+            const t = i / sr;
+            const n = (Math.random() * 2 - 1) * 0.025 * Math.exp(-t * 180);
+            L[i] += n * (1.0 - pan * 0.3);
+            R[i] += n * (0.7 + pan * 0.3);
+          }
+        });
+
+        // ─── Abspielen mit Soundboard-EQ ────────────────
+        const source = ctx.createBufferSource();
+        source.buffer = buffer;
+
+        // Soundboard-Resonanz (Wärme des Holzkörpers)
         const bodyEQ = ctx.createBiquadFilter();
         bodyEQ.type = 'peaking';
-        bodyEQ.frequency.value = 280;
-        bodyEQ.Q.value = 1.2;
-        bodyEQ.gain.value = 4;
+        bodyEQ.frequency.value = 300;
+        bodyEQ.Q.value = 0.9;
+        bodyEQ.gain.value = 3.5;
 
-        // Höhen leicht abrunden (Filz-Dämpfung)
-        const highCut = ctx.createBiquadFilter();
-        highCut.type = 'lowpass';
-        highCut.frequency.value = 6000;
-        highCut.Q.value = 0.5;
+        // Filz-Dämpfung (sanfte Höhenabsenkung)
+        const feltDamp = ctx.createBiquadFilter();
+        feltDamp.type = 'lowshelf';
+        feltDamp.frequency.value = 4500;
+        feltDamp.gain.value = -2;
 
-        pianoMaster.connect(bodyEQ);
-        bodyEQ.connect(highCut);
-        highCut.connect(this.masterGain);
+        const masterGain = ctx.createGain();
+        masterGain.gain.setValueAtTime(0.6, now);
 
-        // ─── 1. Hammer-Anschlag (kurzer Noise-Burst) ────
-        const attackLen = 0.04;
-        const noiseBuf = ctx.createBuffer(1, ctx.sampleRate * attackLen, ctx.sampleRate);
-        const noiseData = noiseBuf.getChannelData(0);
-        for (let i = 0; i < noiseData.length; i++) {
-          noiseData[i] = (Math.random() * 2 - 1);
-        }
-        const noiseNode = ctx.createBufferSource();
-        noiseNode.buffer = noiseBuf;
-
-        const noiseFilter = ctx.createBiquadFilter();
-        noiseFilter.type = 'bandpass';
-        noiseFilter.frequency.value = 3000;
-        noiseFilter.Q.value = 1.5;
-
-        const noiseGain = ctx.createGain();
-        noiseGain.gain.setValueAtTime(0.18, now);
-        noiseGain.gain.exponentialRampToValueAtTime(0.001, now + attackLen);
-
-        noiseNode.connect(noiseFilter);
-        noiseFilter.connect(noiseGain);
-        noiseGain.connect(pianoMaster);
-        noiseNode.start(now);
-
-        // ─── 2. Hauptakkord mit Obertönen (Flügel-Saiten) ──
-        // Oberton-Struktur eines echten Flügels
-        const harmonics = [
-          { mult: 1,   amp: 0.22  },  // Grundton
-          { mult: 2,   amp: 0.14  },  // 1. Oberton (Oktave)
-          { mult: 3,   amp: 0.08  },  // 2. Oberton (Quinte+Okt)
-          { mult: 4,   amp: 0.05  },  // 3. Oberton
-          { mult: 5,   amp: 0.025 },  // 4. Oberton
-          { mult: 6,   amp: 0.012 },  // 5. Oberton (leises Schimmern)
-        ];
-
-        // Drei leicht verstimmte Kopien pro Saite (wie beim echten Flügel)
-        const detunings = [0, 0.8, -0.6]; // Hz Abweichung
-
-        baseFrequencies.forEach(f => {
-          const freq = f * shiftFactor;
-
-          harmonics.forEach(h => {
-            detunings.forEach(dt => {
-              const osc = ctx.createOscillator();
-              const gainNode = ctx.createGain();
-
-              // Mischung: Grundton Triangle (warm), Obertöne Sine (klar)
-              osc.type = h.mult <= 2 ? 'triangle' : 'sine';
-              osc.frequency.setValueAtTime(freq * h.mult + dt, now);
-
-              // Amplitude: Obertöne klingen schneller ab
-              const noteAmp = h.amp / detunings.length;
-              gainNode.gain.setValueAtTime(noteAmp, now);
-              gainNode.gain.exponentialRampToValueAtTime(0.0001, now + decayTime / (1 + h.mult * 0.3));
-
-              osc.connect(gainNode);
-              gainNode.connect(pianoMaster);
-              osc.start(now);
-              osc.stop(now + decayTime + 0.1);
-            });
-          });
-        });
-
-        // ─── 3. Sub-Oktave (Korpus-Resonanz für Fülle) ──
-        baseFrequencies.forEach(f => {
-          const osc = ctx.createOscillator();
-          const gainNode = ctx.createGain();
-          osc.type = 'sine';
-          osc.frequency.setValueAtTime((f * shiftFactor) / 2, now);
-          gainNode.gain.setValueAtTime(0.04, now);
-          gainNode.gain.exponentialRampToValueAtTime(0.0001, now + decayTime * 0.6);
-          osc.connect(gainNode);
-          gainNode.connect(pianoMaster);
-          osc.start(now);
-          osc.stop(now + decayTime + 0.1);
-        });
-
-        // ─── 4. Sympathische Resonanz (Pedal-Effekt) ────
-        resonanceFrequencies.forEach(f => {
-          const osc = ctx.createOscillator();
-          const gainNode = ctx.createGain();
-          osc.type = 'sine';
-          osc.frequency.setValueAtTime(f * shiftFactor, now);
-          // Etwas lauter als vorher für Flügel-Offenheit
-          gainNode.gain.setValueAtTime(0.035, now);
-          gainNode.gain.exponentialRampToValueAtTime(0.0001, now + decayTime * 0.8);
-          osc.connect(gainNode);
-          gainNode.connect(pianoMaster);
-          osc.start(now);
-          osc.stop(now + decayTime + 0.1);
-        });
-
-        // ─── 5. Nachhall-Schicht (Raum-Simulation) ──────
-        const reverbDelay = 0.08;
-        const reverbGain = ctx.createGain();
-        reverbGain.gain.setValueAtTime(0.06, now + reverbDelay);
-        reverbGain.gain.exponentialRampToValueAtTime(0.001, now + decayTime);
-        reverbGain.connect(this.masterGain);
-
-        baseFrequencies.forEach(f => {
-          const osc = ctx.createOscillator();
-          osc.type = 'sine';
-          osc.frequency.setValueAtTime(f * shiftFactor, now);
-          osc.connect(reverbGain);
-          osc.start(now + reverbDelay);
-          osc.stop(now + decayTime + 0.1);
-        });
+        source.connect(bodyEQ);
+        bodyEQ.connect(feltDamp);
+        feltDamp.connect(masterGain);
+        masterGain.connect(this.masterGain);
+        source.start(now);
       },
 
       playPing(pitchOffset = 0) {
