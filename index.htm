@@ -652,6 +652,7 @@
           <button class="pill" data-val="cello">Cello</button>
           <button class="pill" data-val="bowl">Klangschale</button>
           <button class="pill on" data-val="piano">Klavier</button>
+          <button class="pill" data-val="arpeggio">Arpeggio</button>
         </div>
         <div class="sl-row" style="margin-top: 12px">
           <span class="sl-name">Schalen-Pitch</span>
@@ -1051,6 +1052,94 @@
         bodyEQ.gain.value = 3.5;
 
         // Filz-Dämpfung (sanfte Höhenabsenkung)
+        const feltDamp = ctx.createBiquadFilter();
+        feltDamp.type = 'lowshelf';
+        feltDamp.frequency.value = 4500;
+        feltDamp.gain.value = -2;
+
+        const masterGain = ctx.createGain();
+        masterGain.gain.setValueAtTime(0.6, now);
+
+        source.connect(bodyEQ);
+        bodyEQ.connect(feltDamp);
+        feltDamp.connect(masterGain);
+        masterGain.connect(this.masterGain);
+        source.start(now);
+      },
+
+      playArpeggio(phase, duration) {
+        if (!this.initialized || !this.active) return;
+        const ctx = this.ctx;
+        const now = ctx.currentTime;
+        const shiftFactor = Math.pow(2, S.pitchShift / 12);
+        const decayTime = duration * 1.8;
+        const sr = ctx.sampleRate;
+        const noteDelay = 0.12; // 120ms zwischen Noten
+
+        let baseFrequencies;
+        if (phase === 'inhale') {
+          baseFrequencies = [440.00, 523.25, 659.25, 783.99, 880.00];
+        } else {
+          baseFrequencies = [392.00, 466.16, 587.33, 698.46, 783.99];
+        }
+
+        const totalSpread = noteDelay * (baseFrequencies.length - 1);
+        const bufLen = Math.ceil(sr * Math.min(decayTime + totalSpread + 0.2, 14));
+
+        const buffer = ctx.createBuffer(2, bufLen, sr);
+        const L = buffer.getChannelData(0);
+        const R = buffer.getChannelData(1);
+
+        const B = 0.0003;
+        const TAU = 6.283185;
+
+        baseFrequencies.forEach((f, noteIdx) => {
+          const freq = f * shiftFactor;
+          const pan = noteIdx / (baseFrequencies.length - 1);
+          // Jede Note startet versetzt
+          const noteStart = noteIdx * noteDelay;
+          const startSample = Math.floor(noteStart * sr);
+
+          for (let h = 1; h <= 10; h++) {
+            const partialFreq = freq * h * Math.sqrt(1 + B * h * h);
+            const amp = 0.10 / Math.pow(h, 0.72) / baseFrequencies.length;
+            const partialDecay = (3.5 / decayTime) * (1 + h * 0.18);
+            const phi = Math.random() * TAU;
+            const omega = TAU * partialFreq / sr;
+            const attackSpeed = 40 + h * 15;
+
+            for (let i = startSample; i < bufLen; i++) {
+              const t = (i - startSample) / sr;
+              const env = Math.exp(-partialDecay * t) * (1 - Math.exp(-t * attackSpeed));
+              if (env < 0.00005) break;
+              const s = Math.sin(omega * (i - startSample) + phi) * amp * env;
+              L[i] += s * (1.0 - pan * 0.35);
+              R[i] += s * (0.65 + pan * 0.35);
+            }
+          }
+
+          // Hammer-Geräusch pro Note
+          const noiseLen = Math.min(Math.ceil(sr * 0.025), bufLen - startSample);
+          for (let i = 0; i < noiseLen; i++) {
+            const t = i / sr;
+            const n = (Math.random() * 2 - 1) * 0.025 * Math.exp(-t * 180);
+            const si = startSample + i;
+            if (si < bufLen) {
+              L[si] += n * (1.0 - pan * 0.3);
+              R[si] += n * (0.7 + pan * 0.3);
+            }
+          }
+        });
+
+        const source = ctx.createBufferSource();
+        source.buffer = buffer;
+
+        const bodyEQ = ctx.createBiquadFilter();
+        bodyEQ.type = 'peaking';
+        bodyEQ.frequency.value = 300;
+        bodyEQ.Q.value = 0.9;
+        bodyEQ.gain.value = 3.5;
+
         const feltDamp = ctx.createBiquadFilter();
         feltDamp.type = 'lowshelf';
         feltDamp.frequency.value = 4500;
@@ -1678,8 +1767,12 @@
             Audio.playBowl();
           }
           // Klavier: hoher Ton beim Einatmen, tiefer Ton beim Ausatmen
-          if (S.soundType === 'piano' && (currentPhaseObj.phase === 'inhale' || currentPhaseObj.phase === 'exhale')) {
-            Audio.playPiano(currentPhaseObj.phase, currentPhaseObj.duration);
+          if ((S.soundType === 'piano' || S.soundType === 'arpeggio') && (currentPhaseObj.phase === 'inhale' || currentPhaseObj.phase === 'exhale')) {
+            if (S.soundType === 'arpeggio') {
+              Audio.playArpeggio(currentPhaseObj.phase, currentPhaseObj.duration);
+            } else {
+              Audio.playPiano(currentPhaseObj.phase, currentPhaseObj.duration);
+            }
           }
 
           S.lastPhase = currentPhaseObj.phase;
