@@ -801,7 +801,7 @@
 
       build() {
         const ctx = this.ctx;
-        this.oscillators = []; // Reset
+        this.oscillators = [];
 
         this.masterGain = ctx.createGain();
         this.masterGain.gain.value = 0.6;
@@ -809,47 +809,85 @@
 
         this.breathGain = ctx.createGain();
         this.breathGain.gain.value = 0;
-        this.breathGain.connect(this.masterGain);
 
-        const filter = ctx.createBiquadFilter();
-        filter.type = 'lowpass';
-        filter.frequency.value = 1200;
-        filter.Q.value = 0.8;
-        filter.connect(this.breathGain);
+        // ─── Resonanzkörper-Simulation ─────────────────
+        // Decke (Fichte): Wärme bei ~180 Hz
+        const bodyLow = ctx.createBiquadFilter();
+        bodyLow.type = 'peaking';
+        bodyLow.frequency.value = 180;
+        bodyLow.Q.value = 1.5;
+        bodyLow.gain.value = 5;
 
-        // Obertöne Definition
-        const harmonics = [
-          [1, 0.55], [2, 0.42], [3, 0.28], [4, 0.18],
-          [5, 0.12], [6, 0.08], [7, 0.05], [8, 0.03],
-        ];
+        // Steg-Resonanz: Präsenz bei ~800 Hz
+        const bodyMid = ctx.createBiquadFilter();
+        bodyMid.type = 'peaking';
+        bodyMid.frequency.value = 800;
+        bodyMid.Q.value = 2.0;
+        bodyMid.gain.value = 3;
 
+        // Höhendämpfung (kein echtes Cello klingt über 3200 Hz scharf)
+        const bodyLP = ctx.createBiquadFilter();
+        bodyLP.type = 'lowpass';
+        bodyLP.frequency.value = 3200;
+        bodyLP.Q.value = 0.5;
+
+        this.breathGain.connect(bodyLow);
+        bodyLow.connect(bodyMid);
+        bodyMid.connect(bodyLP);
+        bodyLP.connect(this.masterGain);
+
+        // ─── Vibrato (Tonhöhen-Schwankung) ──────────────
         const vibrato = ctx.createOscillator();
-        vibrato.frequency.value = 4.8;
+        vibrato.frequency.value = 5.2; // Professionelles Cello-Vibrato
         vibrato.type = 'sine';
         vibrato.start();
 
         const vibratoDepth = ctx.createGain();
-        vibratoDepth.gain.value = 2.8;
+        vibratoDepth.gain.value = 3.5; // ~3.5 Cent Schwankung
         vibrato.connect(vibratoDepth);
 
-        // Initialisierung ohne feste Frequenz (wird in update gesetzt)
-        harmonics.forEach(([mult, amp]) => {
-          const osc = ctx.createOscillator();
-          osc.type = mult === 1 ? 'sawtooth' : 'sine';
+        // Zweite Vibrato-Schicht: langsame Intensitätsschwankung (Bogendruck)
+        const intensityLFO = ctx.createOscillator();
+        intensityLFO.frequency.value = 0.8;
+        intensityLFO.type = 'sine';
+        intensityLFO.start();
 
-          if (mult <= 2) vibratoDepth.connect(osc.frequency);
+        const intensityDepth = ctx.createGain();
+        intensityDepth.gain.value = 0.06;
+        intensityLFO.connect(intensityDepth);
+        intensityDepth.connect(this.breathGain.gain);
+
+        // ─── Cello-Obertöne (natürliche Streicherspektrum) ──
+        const harmonics = [
+          [1,   0.45, 'sine'],      // Grundton – warm, rund
+          [2,   0.38, 'sine'],      // Oktave – stark beim Cello
+          [3,   0.22, 'triangle'],  // Quinte – gibt Charakter
+          [4,   0.15, 'sine'],      // 2. Oktave
+          [5,   0.10, 'sine'],      // Terz
+          [6,   0.07, 'triangle'],  // bringt Nasalität
+          [7,   0.04, 'sine'],      // leises Schimmern
+          [8,   0.025, 'sine'],     // Hauch von Brillanz
+          [9,   0.015, 'sine'],     // nur noch Textur
+          [10,  0.008, 'sine'],     // Luft
+        ];
+
+        harmonics.forEach(([mult, amp, type]) => {
+          const osc = ctx.createOscillator();
+          osc.type = type;
+
+          // Vibrato auf Grundton und erste Obertöne
+          if (mult <= 3) vibratoDepth.connect(osc.frequency);
 
           const oscGain = ctx.createGain();
           oscGain.gain.value = amp;
           osc.connect(oscGain);
-          oscGain.connect(filter);
+          oscGain.connect(this.breathGain);
           osc.start();
 
-          // NEU: Oszillator-Referenz speichern
           this.oscillators.push({ osc, mult });
         });
 
-        // Bogen-Rauschen
+        // ─── Bogen-Rauschen (Kolophonium auf Saite) ─────
         const bufferSize = ctx.sampleRate * 2;
         const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
         const data = buffer.getChannelData(0);
@@ -861,17 +899,42 @@
         noise.loop = true;
         noise.start();
 
-        const noiseFilter = ctx.createBiquadFilter();
-        noiseFilter.type = 'bandpass';
-        noiseFilter.frequency.value = 900;
-        noiseFilter.Q.value = 0.5;
+        // Tiefes Bogenkratzen (Kolophonium-Rauheit)
+        const rosinFilter = ctx.createBiquadFilter();
+        rosinFilter.type = 'bandpass';
+        rosinFilter.frequency.value = 400;
+        rosinFilter.Q.value = 0.8;
+        const rosinGain = ctx.createGain();
+        rosinGain.gain.value = 0.025;
 
-        const noiseGain = ctx.createGain();
-        noiseGain.gain.value = 0.035;
+        // Hohes Bogenrauschen (Haare auf Saite)
+        const hairFilter = ctx.createBiquadFilter();
+        hairFilter.type = 'bandpass';
+        hairFilter.frequency.value = 1800;
+        hairFilter.Q.value = 1.2;
+        const hairGain = ctx.createGain();
+        hairGain.gain.value = 0.015;
 
-        noise.connect(noiseFilter);
-        noiseFilter.connect(noiseGain);
-        noiseGain.connect(filter);
+        noise.connect(rosinFilter);
+        rosinFilter.connect(rosinGain);
+        rosinGain.connect(this.breathGain);
+
+        noise.connect(hairFilter);
+        hairFilter.connect(hairGain);
+        hairGain.connect(this.breathGain);
+
+        // ─── Sympathische Saiten (leeres Cello klingt mit) ──
+        const openStrings = [65.41, 98.00, 146.83, 220.00]; // C2, G2, D3, A3
+        openStrings.forEach(f => {
+          const osc = ctx.createOscillator();
+          osc.type = 'sine';
+          osc.frequency.value = f;
+          const g = ctx.createGain();
+          g.gain.value = 0.008; // Sehr leise – nur spürbar
+          osc.connect(g);
+          g.connect(this.breathGain);
+          osc.start();
+        });
       },
 
       // NEU: Nimmt jetzt Lautstärke UND Ziel-Frequenz an
