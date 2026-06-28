@@ -1,4 +1,4 @@
-const CACHE_NAME = 'eva-atem-app-v3';
+const CACHE_NAME = 'eva-atem-app-v5';
 const ASSETS_TO_CACHE = [
   './',
   './index.htm',

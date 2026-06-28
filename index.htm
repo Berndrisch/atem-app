@@ -825,11 +825,11 @@
         bodyMid.Q.value = 2.0;
         bodyMid.gain.value = 3;
 
-        // Höhendämpfung (kein echtes Cello klingt über 3200 Hz scharf)
+        // Höhendämpfung (tiefere Grenzfrequenz für wärmeren, weniger kratzigen Cello-Klang)
         const bodyLP = ctx.createBiquadFilter();
         bodyLP.type = 'lowpass';
-        bodyLP.frequency.value = 3200;
-        bodyLP.Q.value = 0.5;
+        bodyLP.frequency.value = 650; // Von 3200 Hz auf 650 Hz abgesenkt für mehr Wärme
+        bodyLP.Q.value = 0.55;
 
         this.breathGain.connect(bodyLow);
         bodyLow.connect(bodyMid);
@@ -843,19 +843,8 @@
         vibrato.start();
 
         const vibratoDepth = ctx.createGain();
-        vibratoDepth.gain.value = 3.5; // ~3.5 Cent Schwankung
+        vibratoDepth.gain.value = 0.6; // Sehr dezentes Vibrato
         vibrato.connect(vibratoDepth);
-
-        // Zweite Vibrato-Schicht: langsame Intensitätsschwankung (Bogendruck)
-        const intensityLFO = ctx.createOscillator();
-        intensityLFO.frequency.value = 0.8;
-        intensityLFO.type = 'sine';
-        intensityLFO.start();
-
-        const intensityDepth = ctx.createGain();
-        intensityDepth.gain.value = 0.06;
-        intensityLFO.connect(intensityDepth);
-        intensityDepth.connect(this.breathGain.gain);
 
         // ─── Cello-Obertöne (natürliche Streicherspektrum) ──
         const harmonics = [
@@ -905,7 +894,7 @@
         rosinFilter.frequency.value = 400;
         rosinFilter.Q.value = 0.8;
         const rosinGain = ctx.createGain();
-        rosinGain.gain.value = 0.025;
+        rosinGain.gain.value = 0.008; // Reduziert von 0.025 für weicheren Bogenstrich
 
         // Hohes Bogenrauschen (Haare auf Saite)
         const hairFilter = ctx.createBiquadFilter();
@@ -913,7 +902,7 @@
         hairFilter.frequency.value = 1800;
         hairFilter.Q.value = 1.2;
         const hairGain = ctx.createGain();
-        hairGain.gain.value = 0.015;
+        hairGain.gain.value = 0.004; // Reduziert von 0.015 für weniger Kratzen
 
         noise.connect(rosinFilter);
         rosinFilter.connect(rosinGain);
@@ -1847,26 +1836,24 @@
         }
 
         // ── NEUE AUDIO LOGIK ─────────────────────────────────
-        // A) Lautstärke-Bogen: Anschwellen und Abschwellen INNERHALB der Phase
+        // ── NEUE AUDIO LOGIK (SCHWEBEND & GLEICHMÄSSIG) ──
+        const currentVal = breathVal(S.bt);
         let volSwell = 0;
+
         if (currentPhaseObj.phase === 'inhale' || currentPhaseObj.phase === 'exhale') {
-          // Sinus-Funktion: Startet bei 0, Mitte ist 1, Ende ist 0
-          volSwell = Math.sin(progress * Math.PI);
+          // Kontinuierlicher Lautstärkebogen, der dem Atemwert folgt (nie komplett stumm)
+          volSwell = 0.22 + 0.43 * currentVal;
         } else {
-          // NEU: Haltephasen behandeln
+          // Haltephasen (Plateaus)
           if (S.drone) {
-            // Ein sehr leises, statisches Brummen (12% der Maximallautstärke)
-            volSwell = 0.12;
+            volSwell = 0.22 + 0.43 * currentVal; // Durchgehender Ton im Plateau
           } else {
-            // Absolute Stille
-            volSwell = 0;
+            volSwell = 0; // Absolute Stille im Plateau
           }
         }
-        // B) Tonhöhe bestimmen (nach dem Wellenberg tiefer)
-        let baseFreq = 146.83; // D3 (Für Einatmen und unteres Plateau)
-        if (currentPhaseObj.phase === 'exhale' || currentPhaseObj.phase === 'hold_top') {
-          baseFreq = 97.99;    // G2 (Tieferer Ton nach dem oberen Scheitelpunkt)
-        }
+
+        // Kontinuierliche Tonhöhe: Gleitet stufenlos zwischen G2 (97.99 Hz) und D3 (146.83 Hz)
+        let baseFreq = 97.99 + (146.83 - 97.99) * currentVal;
 
         // Benutzereinstellung (Pitch-Slider) anwenden
         const shiftFactor = Math.pow(2, S.pitchShift / 12);
