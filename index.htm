@@ -535,16 +535,17 @@
     .landing-word:nth-child(3) { animation: landFadeIn 2s 2.5s ease forwards; }
     .landing-word:nth-child(5) { animation: landFadeIn 2s 3.5s ease forwards; }
 
-    .landing-line {
-      width: 40px;
-      height: 1px;
-      background: #8ab87a;
-      margin: 6px 0;
+    .landing-connector {
+      font-size: clamp(11px, 2.8vw, 15px);
+      font-weight: 300;
+      color: #8ab87a;
+      letter-spacing: 0.12em;
+      margin: 4px 0;
       opacity: 0;
     }
 
-    .landing-line:nth-child(2) { animation: landFadeIn 1.5s 2.0s ease forwards; }
-    .landing-line:nth-child(4) { animation: landFadeIn 1.5s 3.0s ease forwards; }
+    .landing-connector:nth-child(2) { animation: landFadeIn 1.5s 2.0s ease forwards; }
+    .landing-connector:nth-child(4) { animation: landFadeIn 1.5s 3.0s ease forwards; }
 
     .landing-start {
       padding: 14px 42px;
@@ -601,9 +602,9 @@
     <div class="landing-title">EVA</div>
     <div class="landing-sub">
       <span class="landing-word">Einatmen</span>
-      <div class="landing-line"></div>
+      <span class="landing-connector">und</span>
       <span class="landing-word">Verweilen</span>
-      <div class="landing-line"></div>
+      <span class="landing-connector">beim</span>
       <span class="landing-word">Ausatmen</span>
     </div>
     <button class="landing-start" id="landing-start">Beginnen</button>
