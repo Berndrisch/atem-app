@@ -1174,32 +1174,29 @@
         } catch(e) { console.error('Bowl:', e); }
       },
 
-      // ─── Premium-Flügelnote: 2 verstimmte Saiten × 6 Obertöne + Hammer ───
+      // ─── Premium-Flügelnote: 6 Obertöne + Hammer ───
       _playGrandNote(ctx, freq, startTime, decayTime, dest) {
-        // Echte Flügel: 2-3 Saiten pro Note, leicht verstimmt → Chorus/Schwebung
-        [-0.12, 0.12].forEach(detune => {
-          const sFreq = freq + detune;
-          for (let h = 1; h <= 6; h++) {
-            const pFreq = sFreq * h * (1 + 0.0004 * h * h); // Inharmonizität
-            const osc = ctx.createOscillator();
-            osc.type = h <= 2 ? 'sine' : 'triangle';
-            osc.frequency.value = pFreq;
+        for (let h = 1; h <= 6; h++) {
+          const pFreq = freq * h * (1 + 0.0004 * h * h); // Inharmonizität
+          const osc = ctx.createOscillator();
+          osc.type = h <= 2 ? 'sine' : 'triangle';
+          osc.frequency.value = pFreq;
 
-            const g = ctx.createGain();
-            const baseAmp = 0.12 / Math.pow(h, 0.85);
-            const atkEnd = startTime + 0.005 + (h > 2 ? 0.002 : 0.008);
-            g.gain.setValueAtTime(0, startTime);
-            g.gain.linearRampToValueAtTime(baseAmp, atkEnd);
-            const susDecay = decayTime * (0.7 / (1 + h * 0.4));
-            g.gain.setTargetAtTime(baseAmp * 0.4, atkEnd + 0.03, susDecay * 0.15);
-            g.gain.setTargetAtTime(0.0001, startTime + susDecay, susDecay * 0.12);
+          const g = ctx.createGain();
+          const baseAmp = 0.18 / Math.pow(h, 0.85);
+          const atkEnd = startTime + 0.005 + (h > 2 ? 0.002 : 0.008);
+          g.gain.setValueAtTime(0, startTime);
+          g.gain.linearRampToValueAtTime(baseAmp, atkEnd);
+          // Langer, sanfter Ausklang
+          const susDecay = decayTime * (0.9 / (1 + h * 0.35));
+          g.gain.setTargetAtTime(baseAmp * 0.35, atkEnd + 0.03, susDecay * 0.25);
+          g.gain.setTargetAtTime(0.0001, startTime + susDecay, susDecay * 0.2);
 
-            osc.connect(g);
-            g.connect(dest);
-            osc.start(startTime);
-            osc.stop(startTime + decayTime + 1);
-          }
-        });
+          osc.connect(g);
+          g.connect(dest);
+          osc.start(startTime);
+          osc.stop(startTime + decayTime + 1);
+        }
         // Hammer-Noise (Filz auf Saite) – gefiltert auf Notenfrequenz
         const nLen = 0.035;
         const bufSz = Math.ceil(ctx.sampleRate * nLen);
