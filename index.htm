@@ -956,7 +956,7 @@
       },
 
       playBowl() {
-        if (!this.initialized || !this.active) { console.log('Bowl: not init/active', this.initialized, this.active); return; }
+        if (!this.initialized || !this.active) return;
         try {
         const ctx = this.ctx;
 
@@ -1021,12 +1021,11 @@
           osc.start(ctx.currentTime);
           osc.stop(ctx.currentTime + p.decay + 1);
         });
-        console.log('Bowl: played OK');
-        } catch(e) { console.error('Bowl ERROR:', e); }
+        } catch(e) { console.error('Bowl:', e); }
       },
 
       playPiano(phase, duration) {
-        if (!this.initialized || !this.active) { console.log('Piano: not init/active', this.initialized, this.active); return; }
+        if (!this.initialized || !this.active) return;
         try {
         const ctx = this.ctx;
         const now = ctx.currentTime;
@@ -1121,8 +1120,7 @@
         feltDamp.connect(masterGain);
         masterGain.connect(this.masterGain);
         source.start(now);
-        console.log('Piano: played OK, bufLen=' + bufLen);
-        } catch(e) { console.error('Piano ERROR:', e); }
+        } catch(e) { console.error('Piano:', e); }
       },
 
       playArpeggio(phase, duration) {
@@ -1211,7 +1209,6 @@
         feltDamp.connect(masterGain);
         masterGain.connect(this.masterGain);
         source.start(now);
-        console.log('Arpeggio: played OK');
       },
 
       playPing(pitchOffset = 0) {
@@ -1823,12 +1820,10 @@
 
           // Klangschale am Start des Zyklus (Einatmen beginnt)
           if (S.soundType === 'bowl' && currentPhaseObj.phase === 'inhale') {
-            console.log('TRIGGER: Bowl');
             Audio.playBowl();
           }
           // Klavier: hoher Ton beim Einatmen, tiefer Ton beim Ausatmen
           if ((S.soundType === 'piano' || S.soundType === 'arpeggio') && (currentPhaseObj.phase === 'inhale' || currentPhaseObj.phase === 'exhale')) {
-            console.log('TRIGGER:', S.soundType, currentPhaseObj.phase, currentPhaseObj.duration);
             if (S.soundType === 'arpeggio') {
               Audio.playArpeggio(currentPhaseObj.phase, currentPhaseObj.duration);
             } else {

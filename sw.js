@@ -1,55 +1,49 @@
-const CACHE_NAME = 'eva-atem-app-v5';
+const CACHE_NAME = 'eva-atem-app-v6';
 const ASSETS_TO_CACHE = [
   './',
   './index.htm',
   './manifest.json',
-  // Die externe Google Font ebenfalls cachen:
   'https://fonts.googleapis.com/css2?family=Quicksand:wght@300;400;500;600;700&display=swap'
 ];
 
-// Installations-Event: Wird beim ersten Aufruf getriggert und speichert die Assets
+// Installation: Cache befüllen + sofort aktivieren
 self.addEventListener('install', event => {
+  self.skipWaiting(); // Sofort aktivieren, nicht auf alte Tabs warten
   event.waitUntil(
     caches.open(CACHE_NAME)
-      .then(cache => {
-        console.log('Cache erfolgreich geöffnet');
-        return cache.addAll(ASSETS_TO_CACHE);
-      })
+      .then(cache => cache.addAll(ASSETS_TO_CACHE))
   );
 });
 
-// Fetch-Event: Fängt Anfragen ab und liefert sie aus dem Cache
+// Fetch: Network-First – immer zuerst frisch laden, Cache nur als Fallback
 self.addEventListener('fetch', event => {
   event.respondWith(
-    caches.match(event.request)
+    fetch(event.request)
       .then(response => {
-        // Fall 1: Treffer im Cache gefunden -> direkt zurückgeben (Offline-Support)
-        if (response) {
-          return response;
-        }
-        // Fall 2: Nicht im Cache -> regulär aus dem Internet laden
-        return fetch(event.request);
+        // Frische Antwort in Cache speichern
+        const clone = response.clone();
+        caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone));
+        return response;
+      })
+      .catch(() => {
+        // Offline: Aus Cache laden
+        return caches.match(event.request);
       })
   );
 });
 
-// Activate-Event: Räumt alte Caches auf (wichtig für spätere Updates)
+// Activate: Alle alten Caches löschen + sofort Kontrolle übernehmen
 self.addEventListener('activate', event => {
-  const cacheWhitelist = [CACHE_NAME];
   event.waitUntil(
-    caches.keys().then(cacheNames => {
-      return Promise.all(
-        cacheNames.map(cacheName => {
-          if (cacheWhitelist.indexOf(cacheName) === -1) {
-            return caches.delete(cacheName);
-          }
-        })
-      );
-    })
+    caches.keys().then(names =>
+      Promise.all(
+        names.filter(n => n !== CACHE_NAME).map(n => caches.delete(n))
+      )
+    ).then(() => self.clients.claim()) // Sofort alle Tabs übernehmen
   );
 });
 
-// Nachricht vom Client (der App) empfangen, um den neuen SW sofort zu aktivieren
+// Skip-Waiting Nachricht
 self.addEventListener('message', event => {
   if (event.data === 'SKIP_WAITING') {
     self.skipWaiting();
