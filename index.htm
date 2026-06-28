@@ -1177,7 +1177,7 @@
       // ─── Premium-Flügelnote: 2 verstimmte Saiten × 6 Obertöne + Hammer ───
       _playGrandNote(ctx, freq, startTime, decayTime, dest) {
         // Echte Flügel: 2-3 Saiten pro Note, leicht verstimmt → Chorus/Schwebung
-        [-0.4, 0.4].forEach(detune => {
+        [-0.12, 0.12].forEach(detune => {
           const sFreq = freq + detune;
           for (let h = 1; h <= 6; h++) {
             const pFreq = sFreq * h * (1 + 0.0004 * h * h); // Inharmonizität
@@ -1190,9 +1190,9 @@
             const atkEnd = startTime + 0.005 + (h > 2 ? 0.002 : 0.008);
             g.gain.setValueAtTime(0, startTime);
             g.gain.linearRampToValueAtTime(baseAmp, atkEnd);
-            const susDecay = decayTime * (1.0 / (1 + h * 0.3));
-            g.gain.setTargetAtTime(baseAmp * 0.5, atkEnd + 0.05, susDecay * 0.2);
-            g.gain.setTargetAtTime(0.0001, startTime + susDecay, susDecay * 0.15);
+            const susDecay = decayTime * (0.7 / (1 + h * 0.4));
+            g.gain.setTargetAtTime(baseAmp * 0.4, atkEnd + 0.03, susDecay * 0.15);
+            g.gain.setTargetAtTime(0.0001, startTime + susDecay, susDecay * 0.12);
 
             osc.connect(g);
             g.connect(dest);
