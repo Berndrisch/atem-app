@@ -628,6 +628,7 @@
         <div class="pill-row" id="scene-toggle">
           <button class="pill on" data-val="hills">🏔 Hügel</button>
           <button class="pill" data-val="buddha">🧘 Buddha</button>
+          <button class="pill" data-val="bio">📊 Biometrie</button>
         </div>
       </div>
       <div class="section">
@@ -653,6 +654,7 @@
           <button class="pill" data-val="bowl">Klangschale</button>
           <button class="pill on" data-val="piano">Klavier</button>
           <button class="pill" data-val="arpeggio">Arpeggio</button>
+          <button class="pill" data-val="sinus">Sinus</button>
         </div>
         <div class="sl-row" style="margin-top: 12px">
           <span class="sl-name">Schalen-Pitch</span>
@@ -777,7 +779,10 @@
       cLine: '#ffffff',
       cHill: '#7ec850',
       cSky: '#a8c8e8',
-      scene: 'hills', // 'hills' oder 'buddha'
+      scene: 'hills', // 'hills', 'buddha' oder 'bio'
+      coherence: 0,       // Kohärenz-Score 0-100
+      coherenceHistory: [], // Letzte Phasenwechsel-Zeiten
+      lastPhaseTime: 0,    // Zeitpunkt des letzten Phasenwechsels
     };
 
     // ═══════════════════════════════════════
@@ -789,8 +794,10 @@
       breathGain: null,
       initialized: false,
       active: false,
-      oscillators: [], // NEU: Speichert alle Obertöne für den Tonwechsel
-      currentFreq: 0,  // Merkt sich die aktuelle Frequenz
+      oscillators: [],
+      currentFreq: 0,
+      sinusGain: null,  // Separater Gain für Sinus-Sound
+      sinusOsc: null,   // Reiner Sinus-Oszillator
 
       init() {
         if (this.initialized) return;
@@ -924,22 +931,44 @@
           g.connect(this.breathGain);
           osc.start();
         });
+
+        // ─── Sinus-Sound (klinisch, rein) ────────
+        this.sinusGain = ctx.createGain();
+        this.sinusGain.gain.value = 0;
+        this.sinusGain.connect(this.masterGain);
+
+        this.sinusOsc = ctx.createOscillator();
+        this.sinusOsc.type = 'sine';
+        this.sinusOsc.frequency.value = 220;
+        this.sinusOsc.connect(this.sinusGain);
+        this.sinusOsc.start();
       },
 
-      // NEU: Nimmt jetzt Lautstärke UND Ziel-Frequenz an
       update(vol, targetFreq) {
         if (!this.initialized || !this.active) return;
 
-        // 1. Lautstärke anpassen
-        this.breathGain.gain.setTargetAtTime(vol, this.ctx.currentTime, 0.08);
+        const isSinus = (S.soundType === 'sinus');
+        const isCello = (S.soundType === 'cello');
 
-        // 2. Tonhöhe anpassen (Glissando-Effekt)
+        // Cello-Lautstärke
+        this.breathGain.gain.setTargetAtTime(isCello ? vol : 0, this.ctx.currentTime, 0.08);
+
+        // Sinus-Lautstärke
+        if (this.sinusGain) {
+          this.sinusGain.gain.setTargetAtTime(isSinus ? vol * 0.35 : 0, this.ctx.currentTime, 0.08);
+        }
+
+        // Tonhöhe anpassen
         if (Math.abs(this.currentFreq - targetFreq) > 0.1) {
           this.currentFreq = targetFreq;
+          // Cello: langsames Glissando
           this.oscillators.forEach(item => {
-            // Zeitkonstante 0.35s simuliert das sanfte Greifen auf dem Cello
             item.osc.frequency.setTargetAtTime(targetFreq * item.mult, this.ctx.currentTime, 0.35);
           });
+          // Sinus: schnelleres, präziseres Gleiten
+          if (this.sinusOsc) {
+            this.sinusOsc.frequency.setTargetAtTime(targetFreq, this.ctx.currentTime, 0.15);
+          }
         }
       },
 
@@ -1371,6 +1400,215 @@
       ctx.lineWidth = 3;
       ctx.shadowBlur = 0;
       ctx.stroke();
+    }
+
+    // ═══════════════════════════════════════
+    //  BIOMETRIE-SZENE – Performance-Dashboard
+    // ═══════════════════════════════════════
+    function drawBioScene() {
+      const bv = breathVal(S.bt);
+      const phase = currentPhase(S.bt);
+      const ph = S.phases;
+      const total = ph.reduce((a, p) => a + p.duration, 0);
+
+      // ─── Hintergrund ──────────────────────
+      ctx.fillStyle = '#0a0e1a';
+      ctx.fillRect(0, 0, W, H);
+
+      // ─── Rasterlinien (Oszilloskop-Grid) ──
+      ctx.strokeStyle = 'rgba(0, 212, 255, 0.06)';
+      ctx.lineWidth = 1;
+      const gridSpacingY = H / 12;
+      const gridSpacingX = W / 16;
+      for (let y = gridSpacingY; y < H; y += gridSpacingY) {
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+      }
+      for (let x = gridSpacingX; x < W; x += gridSpacingX) {
+        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+      }
+
+      // ─── Kohärenz-Score (oben) ────────────
+      const cohY = H * 0.06;
+      const cohBarW = W * 0.35;
+      const cohBarH = Math.max(8, H * 0.018);
+      const cohX = W * 0.04;
+
+      ctx.font = `bold ${Math.max(11, H * 0.022)}px 'Courier New', monospace`;
+      ctx.fillStyle = '#00d4ff';
+      ctx.textAlign = 'left';
+      ctx.fillText('HRV COHERENCE', cohX, cohY);
+
+      // Fortschrittsbalken
+      const barX = cohX + W * 0.28;
+      const barY = cohY - cohBarH + 2;
+      ctx.fillStyle = 'rgba(0, 212, 255, 0.12)';
+      ctx.fillRect(barX, barY, cohBarW, cohBarH);
+      const cohColor = S.coherence > 70 ? '#00ff88' : S.coherence > 40 ? '#ff8c00' : '#ff3333';
+      ctx.fillStyle = cohColor;
+      ctx.fillRect(barX, barY, cohBarW * (S.coherence / 100), cohBarH);
+
+      // Prozentwert
+      ctx.fillStyle = cohColor;
+      ctx.font = `bold ${Math.max(13, H * 0.028)}px 'Courier New', monospace`;
+      ctx.fillText(Math.round(S.coherence) + '%', barX + cohBarW + W * 0.02, cohY);
+
+      // ─── Oszilloskop-Wellenform (Mitte) ───
+      const waveTop = H * 0.18;
+      const waveBottom = H * 0.68;
+      const waveMid = (waveTop + waveBottom) / 2;
+      const waveAmp = (waveBottom - waveTop) * 0.42;
+
+      // Mittellinie
+      ctx.strokeStyle = 'rgba(0, 212, 255, 0.15)';
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(0, waveMid); ctx.lineTo(W, waveMid); ctx.stroke();
+
+      // Wellenform zeichnen (scrollend)
+      const pps = W / (total * 1.5); // Pixel pro Sekunde – zeigt ~1.5 Zyklen
+      const scanX = W * 0.7; // Scan-Position
+
+      // Glow-Effekt
+      ctx.shadowColor = '#00d4ff';
+      ctx.shadowBlur = 12;
+      ctx.strokeStyle = '#00d4ff';
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+
+      for (let px = 0; px < W; px += 1.5) {
+        const tOffset = (px - scanX) / pps;
+        const val = breathVal(S.bt + tOffset);
+        const y = waveMid - (val - 0.5) * waveAmp * 2;
+
+        // Transparenz: links und rechts vom Scan dunkler
+        if (px === 0) ctx.moveTo(px, y);
+        else ctx.lineTo(px, y);
+      }
+      ctx.stroke();
+
+      // Zweite, blassere Kopie für Glow-Tiefe
+      ctx.shadowBlur = 25;
+      ctx.strokeStyle = 'rgba(0, 212, 255, 0.3)';
+      ctx.lineWidth = 6;
+      ctx.beginPath();
+      for (let px = 0; px < W; px += 3) {
+        const tOffset = (px - scanX) / pps;
+        const val = breathVal(S.bt + tOffset);
+        const y = waveMid - (val - 0.5) * waveAmp * 2;
+        if (px === 0) ctx.moveTo(px, y);
+        else ctx.lineTo(px, y);
+      }
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+
+      // ─── Scan-Linie (vertikaler Strich) ───
+      const grad = ctx.createLinearGradient(scanX, waveTop - 20, scanX, waveBottom + 20);
+      grad.addColorStop(0, 'rgba(0, 212, 255, 0)');
+      grad.addColorStop(0.3, 'rgba(0, 212, 255, 0.5)');
+      grad.addColorStop(0.5, 'rgba(0, 212, 255, 0.9)');
+      grad.addColorStop(0.7, 'rgba(0, 212, 255, 0.5)');
+      grad.addColorStop(1, 'rgba(0, 212, 255, 0)');
+      ctx.strokeStyle = grad;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(scanX, waveTop - 20);
+      ctx.lineTo(scanX, waveBottom + 20);
+      ctx.stroke();
+
+      // Punkt auf der Wellenform an Scan-Position
+      const scanVal = breathVal(S.bt);
+      const scanDotY = waveMid - (scanVal - 0.5) * waveAmp * 2;
+      ctx.shadowColor = '#00d4ff';
+      ctx.shadowBlur = 15;
+      ctx.fillStyle = '#00ffff';
+      ctx.beginPath();
+      ctx.arc(scanX, scanDotY, 5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+
+      // ─── Daten-Panel (unten) ──────────────
+      const panelY = H * 0.76;
+      const fontSize = Math.max(11, Math.min(14, H * 0.022));
+      const labelSize = Math.max(9, Math.min(11, H * 0.016));
+      const colW = W / 4;
+
+      // Atemfrequenz (BPM)
+      const bpm = Math.round(60 / total);
+      ctx.font = `${labelSize}px 'Courier New', monospace`;
+      ctx.fillStyle = 'rgba(0, 212, 255, 0.5)';
+      ctx.textAlign = 'center';
+      ctx.fillText('ATEMFREQ', colW * 0.5, panelY);
+      ctx.font = `bold ${fontSize * 1.6}px 'Courier New', monospace`;
+      ctx.fillStyle = '#00d4ff';
+      ctx.fillText(bpm + ' /min', colW * 0.5, panelY + fontSize * 2.2);
+
+      // Phase
+      const phaseLabels = { inhale: 'EINATMEN', exhale: 'AUSATMEN', hold_top: 'HALTEN ↑', hold_bottom: 'HALTEN ↓' };
+      const phaseColors = { inhale: '#00ff88', exhale: '#00d4ff', hold_top: '#ff8c00', hold_bottom: '#ff8c00' };
+      ctx.font = `${labelSize}px 'Courier New', monospace`;
+      ctx.fillStyle = 'rgba(0, 212, 255, 0.5)';
+      ctx.fillText('PHASE', colW * 1.5, panelY);
+      ctx.font = `bold ${fontSize * 1.4}px 'Courier New', monospace`;
+      ctx.fillStyle = phaseColors[phase] || '#00d4ff';
+      ctx.fillText(phaseLabels[phase] || phase.toUpperCase(), colW * 1.5, panelY + fontSize * 2.2);
+
+      // Zyklen
+      ctx.font = `${labelSize}px 'Courier New', monospace`;
+      ctx.fillStyle = 'rgba(0, 212, 255, 0.5)';
+      ctx.fillText('ZYKLEN', colW * 2.5, panelY);
+      ctx.font = `bold ${fontSize * 1.6}px 'Courier New', monospace`;
+      ctx.fillStyle = '#00d4ff';
+      ctx.fillText(Math.floor(S.breaths), colW * 2.5, panelY + fontSize * 2.2);
+
+      // Zone
+      const zoneText = S.coherence > 70 ? 'OPTIMAL' : S.coherence > 40 ? 'AKTIV' : 'AUFBAU';
+      const zoneColor = S.coherence > 70 ? '#00ff88' : S.coherence > 40 ? '#ff8c00' : '#ff3333';
+      ctx.font = `${labelSize}px 'Courier New', monospace`;
+      ctx.fillStyle = 'rgba(0, 212, 255, 0.5)';
+      ctx.fillText('ZONE', colW * 3.5, panelY);
+      ctx.font = `bold ${fontSize * 1.4}px 'Courier New', monospace`;
+      ctx.fillStyle = zoneColor;
+      ctx.fillText(zoneText, colW * 3.5, panelY + fontSize * 2.2);
+
+      // ─── Trennlinie ───────────────────────
+      ctx.strokeStyle = 'rgba(0, 212, 255, 0.15)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(W * 0.04, panelY - fontSize);
+      ctx.lineTo(W * 0.96, panelY - fontSize);
+      ctx.stroke();
+
+      // ─── Session-Fortschritt (ganz unten) ─
+      const progY = H * 0.93;
+      const progW = W * 0.92;
+      const progH = Math.max(4, H * 0.008);
+      const progX = W * 0.04;
+      const progPct = S.running ? Math.min(1, S.sesTime / S.sesDur) : 0;
+
+      ctx.fillStyle = 'rgba(0, 212, 255, 0.1)';
+      ctx.fillRect(progX, progY, progW, progH);
+      ctx.fillStyle = 'rgba(0, 212, 255, 0.6)';
+      ctx.fillRect(progX, progY, progW * progPct, progH);
+
+      // Timer
+      if (S.running) {
+        const rem = Math.max(0, S.sesDur - S.sesTime);
+        const m = Math.floor(rem / 60);
+        const s = Math.floor(rem % 60);
+        ctx.font = `${labelSize}px 'Courier New', monospace`;
+        ctx.fillStyle = 'rgba(0, 212, 255, 0.4)';
+        ctx.textAlign = 'right';
+        ctx.fillText(m + ':' + String(s).padStart(2, '0'), progX + progW, progY - 4);
+        ctx.textAlign = 'left';
+      }
+
+      // ─── Atemtext (dezent in der Mitte) ───
+      if (S.running) {
+        const txt = phaseLabels[phase] || '';
+        ctx.font = `300 ${Math.max(14, H * 0.03)}px 'Courier New', monospace`;
+        ctx.fillStyle = `rgba(0, 212, 255, ${0.15 + bv * 0.15})`;
+        ctx.textAlign = 'center';
+        ctx.fillText(txt, W / 2, H * 0.14);
+      }
     }
 
     // ═══════════════════════════════════════
@@ -1822,7 +2060,7 @@
           if (S.soundType === 'bowl' && currentPhaseObj.phase === 'inhale') {
             Audio.playBowl();
           }
-          // Klavier: hoher Ton beim Einatmen, tiefer Ton beim Ausatmen
+          // Klavier/Arpeggio: Akkord beim Einatmen/Ausatmen
           if ((S.soundType === 'piano' || S.soundType === 'arpeggio') && (currentPhaseObj.phase === 'inhale' || currentPhaseObj.phase === 'exhale')) {
             if (S.soundType === 'arpeggio') {
               Audio.playArpeggio(currentPhaseObj.phase, currentPhaseObj.duration);
@@ -1830,6 +2068,23 @@
               Audio.playPiano(currentPhaseObj.phase, currentPhaseObj.duration);
             }
           }
+
+          // ─── Kohärenz-Score aktualisieren ──
+          if (S.running && S.lastPhaseTime > 0) {
+            const elapsed = S.sesTime - S.lastPhaseTime;
+            S.coherenceHistory.push(elapsed);
+            if (S.coherenceHistory.length > 10) S.coherenceHistory.shift();
+            // Kohärenz = Wie gleichmäßig sind die Phasenwechsel?
+            if (S.coherenceHistory.length >= 4) {
+              const avg = S.coherenceHistory.reduce((a, b) => a + b) / S.coherenceHistory.length;
+              const variance = S.coherenceHistory.reduce((a, b) => a + Math.pow(b - avg, 2), 0) / S.coherenceHistory.length;
+              const cv = Math.sqrt(variance) / avg; // Variationskoeffizient
+              S.coherence = Math.min(100, Math.max(0, 100 - cv * 500));
+            } else {
+              S.coherence = Math.min(S.coherence + 8, 50); // Langsam aufbauen
+            }
+          }
+          S.lastPhaseTime = S.sesTime;
 
           S.lastPhase = currentPhaseObj.phase;
         }
@@ -1864,15 +2119,17 @@
         const targetFreq = baseFreq * shiftFactor;
 
         // Cello mit den neuen Werten füttern
-        if (S.soundType === 'cello') {
+        if (S.soundType === 'cello' || S.soundType === 'sinus') {
           Audio.update(volSwell, targetFreq);
         } else {
-          Audio.update(0, targetFreq); // Cello stumm schalten bei Bowl/Piano
+          Audio.update(0, targetFreq); // Cello stumm schalten bei anderen Sounds
         }
       }
 
       ctx.clearRect(0, 0, W, H);
-      if (S.scene === 'buddha') {
+      if (S.scene === 'bio') {
+        drawBioScene();
+      } else if (S.scene === 'buddha') {
         drawBuddhaScene();
       } else {
         drawBg();
@@ -1954,7 +2211,7 @@
     const btnStart = document.getElementById('start-btn');
     btnStart.addEventListener('click', () => {
       if (S.sesTime >= S.sesDur) {
-        S.sesTime = 0; S.bt = 0; S.breaths = 0; S.lastPhase = null;
+        S.sesTime = 0; S.bt = 0; S.breaths = 0; S.lastPhase = null; S.coherence = 0; S.coherenceHistory = []; S.lastPhaseTime = 0;
       }
 
       S.running = !S.running;
@@ -2000,7 +2257,7 @@
 
     document.getElementById('btn-new').addEventListener('click', () => {
       document.getElementById('completion').classList.remove('show');
-      S.sesTime = 0; S.bt = 0; S.breaths = 0; S.lastPhase = null;
+      S.sesTime = 0; S.bt = 0; S.breaths = 0; S.lastPhase = null; S.coherence = 0; S.coherenceHistory = []; S.lastPhaseTime = 0;
       checkCongrats();
     });
     document.getElementById('btn-hist').addEventListener('click', () => {
