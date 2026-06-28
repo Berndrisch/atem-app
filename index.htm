@@ -1076,7 +1076,7 @@
 
         // Sinus-Lautstärke
         if (this.sinusGain) {
-          this.sinusGain.gain.setTargetAtTime(isSinus ? vol * 0.35 : 0, this.ctx.currentTime, 0.08);
+          this.sinusGain.gain.setTargetAtTime(isSinus ? vol * 0.55 : 0, this.ctx.currentTime, 0.08);
         }
 
         // Tonhöhe anpassen
@@ -1174,103 +1174,86 @@
         } catch(e) { console.error('Bowl:', e); }
       },
 
+      // ─── Premium-Flügelnote: 2 verstimmte Saiten × 6 Obertöne + Hammer ───
+      _playGrandNote(ctx, freq, startTime, decayTime, dest) {
+        // Echte Flügel: 2-3 Saiten pro Note, leicht verstimmt → Chorus/Schwebung
+        [-0.4, 0.4].forEach(detune => {
+          const sFreq = freq + detune;
+          for (let h = 1; h <= 6; h++) {
+            const pFreq = sFreq * h * (1 + 0.0004 * h * h); // Inharmonizität
+            const osc = ctx.createOscillator();
+            osc.type = h <= 2 ? 'sine' : 'triangle';
+            osc.frequency.value = pFreq;
+
+            const g = ctx.createGain();
+            const baseAmp = 0.12 / Math.pow(h, 0.85);
+            const atkEnd = startTime + 0.005 + (h > 2 ? 0.002 : 0.008);
+            g.gain.setValueAtTime(0, startTime);
+            g.gain.linearRampToValueAtTime(baseAmp, atkEnd);
+            const susDecay = decayTime * (1.0 / (1 + h * 0.3));
+            g.gain.setTargetAtTime(baseAmp * 0.5, atkEnd + 0.05, susDecay * 0.2);
+            g.gain.setTargetAtTime(0.0001, startTime + susDecay, susDecay * 0.15);
+
+            osc.connect(g);
+            g.connect(dest);
+            osc.start(startTime);
+            osc.stop(startTime + decayTime + 1);
+          }
+        });
+        // Hammer-Noise (Filz auf Saite) – gefiltert auf Notenfrequenz
+        const nLen = 0.035;
+        const bufSz = Math.ceil(ctx.sampleRate * nLen);
+        const nBuf = ctx.createBuffer(1, bufSz, ctx.sampleRate);
+        const d = nBuf.getChannelData(0);
+        for (let i = 0; i < bufSz; i++) d[i] = Math.random() * 2 - 1;
+        const nSrc = ctx.createBufferSource();
+        nSrc.buffer = nBuf;
+        const bp = ctx.createBiquadFilter();
+        bp.type = 'bandpass'; bp.frequency.value = freq * 1.5; bp.Q.value = 1.2;
+        const nG = ctx.createGain();
+        nG.gain.setValueAtTime(0.15, startTime);
+        nG.gain.exponentialRampToValueAtTime(0.001, startTime + nLen);
+        nSrc.connect(bp); bp.connect(nG); nG.connect(dest);
+        nSrc.start(startTime); nSrc.stop(startTime + nLen + 0.01);
+      },
+
       playPiano(phase, duration) {
         if (!this.initialized || !this.active) return;
-        try {
         const ctx = this.ctx;
         const now = ctx.currentTime;
         const shiftFactor = Math.pow(2, S.pitchShift / 12);
         const decayTime = duration * 1.8;
-        const sr = ctx.sampleRate;
-        const bufLen = Math.ceil(sr * Math.min(decayTime + 0.2, 12));
 
-        let baseFrequencies;
-        if (phase === 'inhale') {
-          // EINATMEN: A-Moll7
-          baseFrequencies = [440.00, 523.25, 659.25, 783.99, 880.00];
-        } else {
-          // AUSATMEN: G-Moll7
-          baseFrequencies = [392.00, 466.16, 587.33, 698.46, 783.99];
-        }
+        const freqs = phase === 'inhale'
+          ? [440.00, 523.25, 659.25, 783.99, 880.00]
+          : [392.00, 466.16, 587.33, 698.46, 783.99];
 
-        // ─── Stereo-Buffer berechnen (Sample für Sample) ──
-        const buffer = ctx.createBuffer(2, bufLen, sr);
-        const L = buffer.getChannelData(0);
-        const R = buffer.getChannelData(1);
+        // Master → Output
+        const master = ctx.createGain();
+        master.gain.setValueAtTime(0.65, now);
+        master.gain.setTargetAtTime(0.001, now + decayTime, decayTime * 0.2);
+        master.connect(this.masterGain);
 
-        // Inharmonizitätskoeffizient (Saitensteifigkeit eines echten Flügels)
-        const B = 0.0003;
-        const TAU = 6.283185;
-
-        baseFrequencies.forEach((f, noteIdx) => {
-          const freq = f * shiftFactor;
-          // Stereo-Position: Tiefe Noten links, hohe rechts (wie echter Flügel)
-          const pan = noteIdx / (baseFrequencies.length - 1); // 0..1
-
-          // 10 Obertöne mit physikalisch korrekter Inharmonizität
-          for (let h = 1; h <= 10; h++) {
-            // Echte Klaviersaiten: Obertöne sind leicht zu hoch (Steifigkeit)
-            const partialFreq = freq * h * Math.sqrt(1 + B * h * h);
-
-            // Amplitude: kräftig genug für vollen Flügelklang
-            const amp = 0.30 / Math.pow(h, 0.72) / baseFrequencies.length;
-
-            // Jeder Oberton hat seine eigene Abklingrate (höhere klingen schneller ab)
-            const partialDecay = (2.5 / decayTime) * (1 + h * 0.25);
-
-            // Zufällige Phase – DAS verhindert den elektronischen Klang
-            const phi = Math.random() * TAU;
-            const omega = TAU * partialFreq / sr;
-
-            // Hammer-Attacke: höhere Obertöne kommen schneller (Brillanz beim Anschlag)
-            const attackSpeed = 40 + h * 15;
-
-            for (let i = 0; i < bufLen; i++) {
-              const t = i / sr;
-              const env = Math.exp(-partialDecay * t) * (1 - Math.exp(-t * attackSpeed));
-              if (env < 0.00005) break; // Optimierung: unhörbare Samples überspringen
-              const s = Math.sin(omega * i + phi) * amp * env;
-              L[i] += s * (1.0 - pan * 0.35);
-              R[i] += s * (0.65 + pan * 0.35);
-            }
-          }
-
-          // Hammer-Geräusch pro Note (Filz auf Saite)
-          const noiseLen = Math.min(Math.ceil(sr * 0.025), bufLen);
-          for (let i = 0; i < noiseLen; i++) {
-            const t = i / sr;
-            const n = (Math.random() * 2 - 1) * 0.06 * Math.exp(-t * 150);
-            L[i] += n * (1.0 - pan * 0.3);
-            R[i] += n * (0.7 + pan * 0.3);
-          }
-        });
-
-        // ─── Abspielen mit Soundboard-EQ ────────────────
-        const source = ctx.createBufferSource();
-        source.buffer = buffer;
-
-        // Soundboard-Resonanz (Wärme des Holzkörpers)
+        // Soundboard-Resonanz (Holzkörper-Wärme)
         const bodyEQ = ctx.createBiquadFilter();
         bodyEQ.type = 'peaking';
-        bodyEQ.frequency.value = 300;
-        bodyEQ.Q.value = 0.9;
-        bodyEQ.gain.value = 3.5;
+        bodyEQ.frequency.value = 260; bodyEQ.Q.value = 0.7; bodyEQ.gain.value = 5;
+        bodyEQ.connect(master);
 
-        // Filz-Dämpfung (sanfte Höhenabsenkung)
-        const feltDamp = ctx.createBiquadFilter();
-        feltDamp.type = 'lowshelf';
-        feltDamp.frequency.value = 4500;
-        feltDamp.gain.value = -2;
+        // Präsenz/Klarheit
+        const presence = ctx.createBiquadFilter();
+        presence.type = 'peaking';
+        presence.frequency.value = 2800; presence.Q.value = 0.5; presence.gain.value = 2;
+        presence.connect(bodyEQ);
 
-        const masterGain = ctx.createGain();
-        masterGain.gain.setValueAtTime(1.2, now);
+        // Filz-Dämpfung: öffnet beim Attack, schließt sich langsam
+        const felt = ctx.createBiquadFilter();
+        felt.type = 'lowpass';
+        felt.frequency.setValueAtTime(6500, now);
+        felt.frequency.setTargetAtTime(1800, now + 0.15, decayTime * 0.25);
+        felt.connect(presence);
 
-        source.connect(bodyEQ);
-        bodyEQ.connect(feltDamp);
-        feltDamp.connect(masterGain);
-        masterGain.connect(this.masterGain);
-        source.start(now);
-        } catch(e) { console.error('Piano:', e); }
+        freqs.forEach(f => this._playGrandNote(ctx, f * shiftFactor, now, decayTime, felt));
       },
 
       playArpeggio(phase, duration) {
@@ -1279,86 +1262,36 @@
         const now = ctx.currentTime;
         const shiftFactor = Math.pow(2, S.pitchShift / 12);
         const decayTime = duration * 1.8;
-        const sr = ctx.sampleRate;
-        const noteDelay = 0.12; // 120ms zwischen Noten
+        const noteDelay = 0.09; // 90ms – eleganter Harfen-Roll
 
-        let baseFrequencies;
-        if (phase === 'inhale') {
-          baseFrequencies = [440.00, 523.25, 659.25, 783.99, 880.00];
-        } else {
-          baseFrequencies = [392.00, 466.16, 587.33, 698.46, 783.99];
-        }
+        const freqs = phase === 'inhale'
+          ? [440.00, 523.25, 659.25, 783.99, 880.00]
+          : [392.00, 466.16, 587.33, 698.46, 783.99];
 
-        const totalSpread = noteDelay * (baseFrequencies.length - 1);
-        const bufLen = Math.ceil(sr * Math.min(decayTime + totalSpread + 0.2, 14));
-
-        const buffer = ctx.createBuffer(2, bufLen, sr);
-        const L = buffer.getChannelData(0);
-        const R = buffer.getChannelData(1);
-
-        const B = 0.0003;
-        const TAU = 6.283185;
-
-        baseFrequencies.forEach((f, noteIdx) => {
-          const freq = f * shiftFactor;
-          const pan = noteIdx / (baseFrequencies.length - 1);
-          // Jede Note startet versetzt
-          const noteStart = noteIdx * noteDelay;
-          const startSample = Math.floor(noteStart * sr);
-
-          for (let h = 1; h <= 10; h++) {
-            const partialFreq = freq * h * Math.sqrt(1 + B * h * h);
-            const amp = 0.30 / Math.pow(h, 0.72) / baseFrequencies.length;
-            const partialDecay = (2.5 / decayTime) * (1 + h * 0.25);
-            const phi = Math.random() * TAU;
-            const omega = TAU * partialFreq / sr;
-            const attackSpeed = 40 + h * 15;
-
-            for (let i = startSample; i < bufLen; i++) {
-              const t = (i - startSample) / sr;
-              const env = Math.exp(-partialDecay * t) * (1 - Math.exp(-t * attackSpeed));
-              if (env < 0.00005) break;
-              const s = Math.sin(omega * (i - startSample) + phi) * amp * env;
-              L[i] += s * (1.0 - pan * 0.35);
-              R[i] += s * (0.65 + pan * 0.35);
-            }
-          }
-
-          // Hammer-Geräusch pro Note
-          const noiseLen = Math.min(Math.ceil(sr * 0.025), bufLen - startSample);
-          for (let i = 0; i < noiseLen; i++) {
-            const t = i / sr;
-            const n = (Math.random() * 2 - 1) * 0.06 * Math.exp(-t * 150);
-            const si = startSample + i;
-            if (si < bufLen) {
-              L[si] += n * (1.0 - pan * 0.3);
-              R[si] += n * (0.7 + pan * 0.3);
-            }
-          }
-        });
-
-        const source = ctx.createBufferSource();
-        source.buffer = buffer;
+        const master = ctx.createGain();
+        master.gain.setValueAtTime(0.60, now);
+        master.gain.setTargetAtTime(0.001, now + decayTime, decayTime * 0.2);
+        master.connect(this.masterGain);
 
         const bodyEQ = ctx.createBiquadFilter();
         bodyEQ.type = 'peaking';
-        bodyEQ.frequency.value = 300;
-        bodyEQ.Q.value = 0.9;
-        bodyEQ.gain.value = 3.5;
+        bodyEQ.frequency.value = 260; bodyEQ.Q.value = 0.7; bodyEQ.gain.value = 5;
+        bodyEQ.connect(master);
 
-        const feltDamp = ctx.createBiquadFilter();
-        feltDamp.type = 'lowshelf';
-        feltDamp.frequency.value = 4500;
-        feltDamp.gain.value = -2;
+        const presence = ctx.createBiquadFilter();
+        presence.type = 'peaking';
+        presence.frequency.value = 2800; presence.Q.value = 0.5; presence.gain.value = 2;
+        presence.connect(bodyEQ);
 
-        const masterGain = ctx.createGain();
-        masterGain.gain.setValueAtTime(1.2, now);
+        const felt = ctx.createBiquadFilter();
+        felt.type = 'lowpass';
+        felt.frequency.setValueAtTime(6500, now);
+        felt.frequency.setTargetAtTime(1800, now + 0.3, decayTime * 0.25);
+        felt.connect(presence);
 
-        source.connect(bodyEQ);
-        bodyEQ.connect(feltDamp);
-        feltDamp.connect(masterGain);
-        masterGain.connect(this.masterGain);
-        source.start(now);
+        freqs.forEach((f, i) => {
+          this._playGrandNote(ctx, f * shiftFactor, now + i * noteDelay, decayTime, felt);
+        });
       },
 
       playPing(pitchOffset = 0) {
