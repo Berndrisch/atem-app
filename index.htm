@@ -1110,108 +1110,144 @@
         try {
         const ctx = this.ctx;
 
-        // Healing frequency + Tuning
-        const baseFreq = 174 * Math.pow(2, S.bowlPitch / 12);
+        // Healing frequency + Tuning – tieferer Grundton für mehr Volumen
+        const baseFreq = 160 * Math.pow(2, S.bowlPitch / 12);
 
-        // Characteristic overtones for a singing bowl
-        const partials = [
-          // Fundament: schwingt extrem lange nach, reiner, starrer Ton ohne Absinken am Anfang
-          { mult: 1.0, amp: 1.0, decay: 34, pitchDrift: 0.0, attack: 0.06 },
-          // Körper: wärmt den Klang auf
-          { mult: 2.76, amp: 0.6, decay: 22, pitchDrift: -1.5, attack: 0.04 },
-          // Bloom-Oberton: schwillt erst im Ausklang stark an und zieht nach oben!
-          { mult: 5.4, amp: 0.55, decay: 18, pitchDrift: 4.5, attack: 4.5 },
-          // Starker metallischer Anschlag (harter Clack)
-          { mult: 8.93, amp: 0.5, decay: 7, pitchDrift: -2.0, attack: 0.02 },
-          // Hohes Zing
-          { mult: 14.34, amp: 0.25, decay: 3, pitchDrift: -6.0, attack: 0.01 }
+        // Physikalische Mode-Frequenzen einer Klangschale mit Mode-Splitting
+        // Jeder Mode hat 2 leicht verstimmte Frequenzen → natürliche Schwebung
+        const modes = [
+          { ratio: 1.000, amp: 1.0,   beatHz: 0.5,  decay: 28, attack: 0.06 },
+          { ratio: 2.71,  amp: 0.55,  beatHz: 0.8,  decay: 18, attack: 0.04 },
+          { ratio: 5.40,  amp: 0.50,  beatHz: 1.2,  decay: 14, attack: 3.5  },
+          { ratio: 8.93,  amp: 0.35,  beatHz: 1.8,  decay: 6,  attack: 0.02 },
+          { ratio: 14.34, amp: 0.18,  beatHz: 2.2,  decay: 3,  attack: 0.01 }
         ];
 
+        // Master-Gain – voluminöser
         const masterGain = ctx.createGain();
         masterGain.gain.setValueAtTime(0, ctx.currentTime);
-        // Direkter, viel knackigerer Anschlag
-        masterGain.gain.linearRampToValueAtTime(1.1, ctx.currentTime + 0.02);
-        // Noch längeres, getragenes Ausklingen
-        masterGain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 34);
+        masterGain.gain.linearRampToValueAtTime(1.3, ctx.currentTime + 0.02);
+        masterGain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 30);
         masterGain.connect(this.masterGain);
 
-        partials.forEach(p => {
-          const osc = ctx.createOscillator();
-          osc.type = 'sine';
+        // Body-EQ: mehr Bauch bei 200-300Hz
+        const bodyEQ = ctx.createBiquadFilter();
+        bodyEQ.type = 'peaking';
+        bodyEQ.frequency.value = 240; bodyEQ.Q.value = 1.5; bodyEQ.gain.value = 4;
+        bodyEQ.connect(masterGain);
 
-          osc.frequency.setValueAtTime(baseFreq * p.mult, ctx.currentTime);
-          osc.frequency.linearRampToValueAtTime((baseFreq * p.mult) + p.pitchDrift, ctx.currentTime + p.decay);
+        // Obertöne etwas wärmer
+        const warmth = ctx.createBiquadFilter();
+        warmth.type = 'highshelf';
+        warmth.frequency.value = 3000; warmth.gain.value = -3;
+        warmth.connect(bodyEQ);
 
-          // Schwebung (Beating)
-          const lfo = ctx.createOscillator();
-          lfo.type = 'sine';
-          lfo.frequency.setValueAtTime(0.5 + (Math.random() * 1.5), ctx.currentTime);
+        modes.forEach(m => {
+          const freq = baseFreq * m.ratio;
 
-          // Wenn es der Bloom-Oberton ist, wird die Schwebung nach dem Anschlag deutlich schneller
-          if (p.mult === 5.4) {
-            lfo.frequency.linearRampToValueAtTime(5.0, ctx.currentTime + p.decay);
-          }
+          // Mode-Splitting: ZWEI Oszillatoren pro Mode → Schwebung
+          [0, m.beatHz].forEach(offset => {
+            const osc = ctx.createOscillator();
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(freq + offset, ctx.currentTime);
 
-          const lfoGain = ctx.createGain();
-          lfoGain.gain.value = 1.0 + (p.mult * 0.25);
-          lfo.connect(lfoGain);
-          lfoGain.connect(osc.frequency);
-          lfo.start(ctx.currentTime);
-          lfo.stop(ctx.currentTime + p.decay + 1);
+            const gain = ctx.createGain();
+            gain.gain.setValueAtTime(0, ctx.currentTime);
+            gain.gain.linearRampToValueAtTime(m.amp * 0.5, ctx.currentTime + m.attack);
+            gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + m.decay);
 
-          const gain = ctx.createGain();
-          gain.gain.setValueAtTime(0, ctx.currentTime);
-          // Individuelles Anschwellen (Bloom dauert 4.5s, Anschlag 0.02s)
-          gain.gain.linearRampToValueAtTime(p.amp, ctx.currentTime + p.attack);
-          gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + p.decay);
-
-          osc.connect(gain);
-          gain.connect(masterGain);
-
-          osc.start(ctx.currentTime);
-          osc.stop(ctx.currentTime + p.decay + 1);
+            osc.connect(gain);
+            gain.connect(warmth);
+            osc.start(ctx.currentTime + Math.random() * 0.008);
+            osc.stop(ctx.currentTime + m.decay + 1);
+          });
         });
         } catch(e) { console.error('Bowl:', e); }
       },
 
-      // ─── Premium-Flügelnote: 6 Obertöne + Hammer ───
+      // ─── Konzertflügel: 12 Obertöne, gemessene Amplituden, Hammer-Noise ───
       _playGrandNote(ctx, freq, startTime, decayTime, dest) {
-        for (let h = 1; h <= 6; h++) {
-          const pFreq = freq * h * (1 + 0.0004 * h * h); // Inharmonizität
+        // Gemessene Partial-Amplituden eines echten Konzertflügels (FFT)
+        const partialAmps = [
+          1.000, 0.630, 0.450, 0.316, 0.224,
+          0.178, 0.145, 0.150, 0.079, 0.056,
+          0.040, 0.032
+        ];
+        const B = 0.0002; // Inharmonizität Mittelregister
+
+        for (let n = 1; n <= 12; n++) {
+          const pFreq = freq * n * Math.sqrt(1 + B * n * n);
           const osc = ctx.createOscillator();
-          osc.type = h <= 2 ? 'sine' : 'triangle';
+          osc.type = 'sine'; // Reine Sinustöne wie echte Saiten
           osc.frequency.value = pFreq;
 
           const g = ctx.createGain();
-          const baseAmp = 0.18 / Math.pow(h, 0.85);
-          const atkEnd = startTime + 0.005 + (h > 2 ? 0.002 : 0.008);
+          const amp = partialAmps[n - 1] * 0.10;
           g.gain.setValueAtTime(0, startTime);
-          g.gain.linearRampToValueAtTime(baseAmp, atkEnd);
-          // Langer, sanfter Ausklang
-          const susDecay = decayTime * (0.9 / (1 + h * 0.35));
-          g.gain.setTargetAtTime(baseAmp * 0.35, atkEnd + 0.03, susDecay * 0.25);
-          g.gain.setTargetAtTime(0.0001, startTime + susDecay, susDecay * 0.2);
+          g.gain.linearRampToValueAtTime(amp, startTime + 0.004);
+          // Per-Partial Decay: höhere Obertöne sterben schneller
+          const pDecay = decayTime / (1 + n * 0.2);
+          g.gain.setTargetAtTime(amp * 0.3, startTime + 0.05, pDecay * 0.3);
+          g.gain.setTargetAtTime(0.0001, startTime + pDecay, pDecay * 0.18);
 
           osc.connect(g);
           g.connect(dest);
           osc.start(startTime);
-          osc.stop(startTime + decayTime + 1);
+          osc.stop(startTime + decayTime + 1.5);
         }
-        // Hammer-Noise (Filz auf Saite) – gefiltert auf Notenfrequenz
-        const nLen = 0.035;
+        // Hammer-Noise: Filz-auf-Saite mit Lowpass-Sweep nach unten
+        const nLen = 0.028;
         const bufSz = Math.ceil(ctx.sampleRate * nLen);
         const nBuf = ctx.createBuffer(1, bufSz, ctx.sampleRate);
         const d = nBuf.getChannelData(0);
         for (let i = 0; i < bufSz; i++) d[i] = Math.random() * 2 - 1;
         const nSrc = ctx.createBufferSource();
         nSrc.buffer = nBuf;
-        const bp = ctx.createBiquadFilter();
-        bp.type = 'bandpass'; bp.frequency.value = freq * 1.5; bp.Q.value = 1.2;
+        const lp = ctx.createBiquadFilter();
+        lp.type = 'lowpass';
+        lp.frequency.setValueAtTime(3500, startTime);
+        lp.frequency.exponentialRampToValueAtTime(800, startTime + 0.015);
+        lp.Q.value = 3.0; // Holziger Knock
         const nG = ctx.createGain();
-        nG.gain.setValueAtTime(0.15, startTime);
-        nG.gain.exponentialRampToValueAtTime(0.001, startTime + nLen);
-        nSrc.connect(bp); bp.connect(nG); nG.connect(dest);
+        nG.gain.setValueAtTime(0.18, startTime);
+        nG.gain.linearRampToValueAtTime(0.18, startTime + 0.002);
+        nG.gain.exponentialRampToValueAtTime(0.0001, startTime + nLen);
+        nSrc.connect(lp); lp.connect(nG); nG.connect(dest);
         nSrc.start(startTime); nSrc.stop(startTime + nLen + 0.01);
+      },
+
+      // Shared Filterkette: Filz → Brillanz → Soundboard → Rumble-Cut → Master
+      _createGrandChain(ctx, now, decayTime, feltClose) {
+        const master = ctx.createGain();
+        master.gain.setValueAtTime(0.70, now);
+        master.gain.setTargetAtTime(0.001, now + decayTime * 1.1, decayTime * 0.22);
+        master.connect(this.masterGain);
+
+        // Sub-Rumble entfernen
+        const hp = ctx.createBiquadFilter();
+        hp.type = 'highpass'; hp.frequency.value = 45; hp.Q.value = 0.7;
+        hp.connect(master);
+
+        // Soundboard-Resonanz (Holzkörper 280Hz)
+        const body = ctx.createBiquadFilter();
+        body.type = 'peaking';
+        body.frequency.value = 280; body.Q.value = 2.5; body.gain.value = 4;
+        body.connect(hp);
+
+        // Brillanz/Klarheit (1800Hz)
+        const bite = ctx.createBiquadFilter();
+        bite.type = 'peaking';
+        bite.frequency.value = 1800; bite.Q.value = 1.5; bite.gain.value = 3;
+        bite.connect(body);
+
+        // Filz-Dämpfung: öffnet beim Attack, schließt sich natürlich
+        const felt = ctx.createBiquadFilter();
+        felt.type = 'lowpass'; felt.Q.value = 1.0;
+        felt.frequency.setValueAtTime(5500, now);
+        felt.frequency.setTargetAtTime(1600, now + feltClose, decayTime * 0.28);
+        felt.connect(bite);
+
+        return felt;
       },
 
       playPiano(phase, duration) {
@@ -1219,38 +1255,15 @@
         const ctx = this.ctx;
         const now = ctx.currentTime;
         const shiftFactor = Math.pow(2, S.pitchShift / 12);
-        const decayTime = duration * 1.8;
+        const decayTime = duration * 2.0;
 
+        // Cmaj9 „Cinematic Spread" (Einatmen) / Abmaj7 warm (Ausatmen)
         const freqs = phase === 'inhale'
-          ? [440.00, 523.25, 659.25, 783.99, 880.00]
-          : [392.00, 466.16, 587.33, 698.46, 783.99];
+          ? [130.81, 196.00, 293.66, 329.63, 493.88]  // C3-G3-D4-E4-B4
+          : [130.81, 185.00, 261.63, 329.63, 392.00]; // C3-Gb3-C4-E4-G4
 
-        // Master → Output
-        const master = ctx.createGain();
-        master.gain.setValueAtTime(0.65, now);
-        master.gain.setTargetAtTime(0.001, now + decayTime, decayTime * 0.2);
-        master.connect(this.masterGain);
-
-        // Soundboard-Resonanz (Holzkörper-Wärme)
-        const bodyEQ = ctx.createBiquadFilter();
-        bodyEQ.type = 'peaking';
-        bodyEQ.frequency.value = 260; bodyEQ.Q.value = 0.7; bodyEQ.gain.value = 5;
-        bodyEQ.connect(master);
-
-        // Präsenz/Klarheit
-        const presence = ctx.createBiquadFilter();
-        presence.type = 'peaking';
-        presence.frequency.value = 2800; presence.Q.value = 0.5; presence.gain.value = 2;
-        presence.connect(bodyEQ);
-
-        // Filz-Dämpfung: öffnet beim Attack, schließt sich langsam
-        const felt = ctx.createBiquadFilter();
-        felt.type = 'lowpass';
-        felt.frequency.setValueAtTime(6500, now);
-        felt.frequency.setTargetAtTime(1800, now + 0.15, decayTime * 0.25);
-        felt.connect(presence);
-
-        freqs.forEach(f => this._playGrandNote(ctx, f * shiftFactor, now, decayTime, felt));
+        const dest = this._createGrandChain(ctx, now, decayTime, 0.12);
+        freqs.forEach(f => this._playGrandNote(ctx, f * shiftFactor, now, decayTime, dest));
       },
 
       playArpeggio(phase, duration) {
@@ -1258,36 +1271,16 @@
         const ctx = this.ctx;
         const now = ctx.currentTime;
         const shiftFactor = Math.pow(2, S.pitchShift / 12);
-        const decayTime = duration * 1.8;
-        const noteDelay = 0.09; // 90ms – eleganter Harfen-Roll
+        const decayTime = duration * 2.0;
+        const noteDelay = 0.085;
 
         const freqs = phase === 'inhale'
-          ? [440.00, 523.25, 659.25, 783.99, 880.00]
-          : [392.00, 466.16, 587.33, 698.46, 783.99];
+          ? [130.81, 196.00, 293.66, 329.63, 493.88]
+          : [130.81, 185.00, 261.63, 329.63, 392.00];
 
-        const master = ctx.createGain();
-        master.gain.setValueAtTime(0.60, now);
-        master.gain.setTargetAtTime(0.001, now + decayTime, decayTime * 0.2);
-        master.connect(this.masterGain);
-
-        const bodyEQ = ctx.createBiquadFilter();
-        bodyEQ.type = 'peaking';
-        bodyEQ.frequency.value = 260; bodyEQ.Q.value = 0.7; bodyEQ.gain.value = 5;
-        bodyEQ.connect(master);
-
-        const presence = ctx.createBiquadFilter();
-        presence.type = 'peaking';
-        presence.frequency.value = 2800; presence.Q.value = 0.5; presence.gain.value = 2;
-        presence.connect(bodyEQ);
-
-        const felt = ctx.createBiquadFilter();
-        felt.type = 'lowpass';
-        felt.frequency.setValueAtTime(6500, now);
-        felt.frequency.setTargetAtTime(1800, now + 0.3, decayTime * 0.25);
-        felt.connect(presence);
-
+        const dest = this._createGrandChain(ctx, now, decayTime, 0.25);
         freqs.forEach((f, i) => {
-          this._playGrandNote(ctx, f * shiftFactor, now + i * noteDelay, decayTime, felt);
+          this._playGrandNote(ctx, f * shiftFactor, now + i * noteDelay, decayTime, dest);
         });
       },
 
