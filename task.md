@@ -1,12 +1,12 @@
 # Tasks (Eva – Einatmen*Verweilen*Ausatmen)
 
-> **Letzte Aktualisierung:** 2026-05-29
+> **Letzte Aktualisierung:** 2026-11-11
 
 Hier werden alle anstehenden und erledigten Projektschritte verwaltet.
 
 ---
 
-## Phase 0: Initiales Setup (Erledigt ✅)
+## Phase 0: Initiales Setup & Audio/Visual Upgrades (Erledigt ✅)
 
 - [x] Projekt-Repository angelegt und `.gitignore` konfiguriert
 - [x] PWA-Grundstruktur erstellt (`index.htm`, `sw.js`, `manifest.json`, Icons)
@@ -19,6 +19,14 @@ Hier werden alle anstehenden und erledigten Projektschritte verwaltet.
   - [x] Verlaufs-Diagramm (4-Wochen-Balkendiagramm)
   - [x] Service Worker mit Update-Banner
   - [x] Screen Wake Lock für aktive Sessions
+- [x] Audio- und Synthese-Überarbeitungen:
+  - [x] Sinus-Sound: Reset in `setActive` korrigiert
+  - [x] Cello-Sound: Tiefpassfilter von 650 Hz auf 1800 Hz geöffnet für wärmeren, lebendigeren Klang
+  - [x] Flügelton / Arpeggio: 12 Obertöne mit FFT-Amplituden, Obertöne 3–6 mit Triangle-Textur für Körper und Tiefe
+  - [x] Transposition: Filterresonanzen und Dämpfung in `_createGrandChain` dynamisch an `shiftFactor` gekoppelt
+  - [x] Akkord-Tondifferenz: Am7 (Einatmen, hoch) / Gm7 (Ausatmen, tief)
+- [x] Visuelle Szenen:
+  - [x] Buddha-Szene: Bauchvolumen vergrößert (Grundradius 42, Expansion 38, angepasste Beine & Highlights)
 - [x] Code-Inventur und Stack-Analyse durchgeführt (2026-05-28)
 - [x] Baseline-Verifizierung: Zweiter Durchlauf bestätigt alle Einträge (2026-05-29)
 - [x] Technische Baseline-Dokumentation erstellt und verifiziert:
