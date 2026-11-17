@@ -789,11 +789,11 @@
         <div class="pill-row" id="durations"></div>
       </div>
       <div class="section">
-        <div class="sec-label">Klangfarbe (Transposition)</div>
+        <div class="sec-label">Klangfarbe (Transposition in Halbtonschritten)</div>
         <div class="sl-row">
-          <span class="sl-name">Tonhöhe</span>
+          <span class="sl-name">Halbtöne</span>
           <input type="range" id="p-pitch" min="-12" max="12" step="1" value="0">
-          <span class="sl-val" id="v-pitch">0</span>
+          <span class="sl-val" id="v-pitch" style="min-width: 130px; text-align: right;">±0 HT (Am / Gm)</span>
         </div>
         <div class="section">
           <div class="sec-label">Haltephasen (Plateaus)</div>
@@ -1166,7 +1166,7 @@
         } catch(e) { console.error('Bowl:', e); }
       },
 
-      // ─── Konzertflügel: 12 Obertöne, gemessene Amplituden, Hammer-Noise ───
+      // ─── Konzertflügel: 12 Obertöne, gemessene FFT-Amplituden, Bassfundament & Hammer-Noise ───
       _playGrandNote(ctx, freq, startTime, decayTime, dest) {
         // Gemessene Partial-Amplituden eines echten Konzertflügels (FFT)
         const partialAmps = [
@@ -1174,31 +1174,37 @@
           0.178, 0.145, 0.150, 0.079, 0.056,
           0.040, 0.032
         ];
-        const B = 0.0002; // Inharmonizität Mittelregister
+        const isBass = freq < 180;
+        const B = isBass ? 0.00012 : 0.00025; // Bass-Saiten haben geringere Inharmonizität
+        const noteDecay = isBass ? decayTime * 1.35 : decayTime;
+        const baseAmpScale = isBass ? 0.14 : 0.09; // Bass-Saiten tragen mehr Energie und Körper
 
         for (let n = 1; n <= 12; n++) {
           const pFreq = freq * n * Math.sqrt(1 + B * n * n);
           const osc = ctx.createOscillator();
-          // Grundtöne warm (sine), Obertöne mit subtilem Oberton-Gehalt (triangle) für Tiefe & Körper
-          osc.type = (n === 1 || n === 2) ? 'sine' : (n <= 6 ? 'triangle' : 'sine');
+          // Grundtöne rein (sine), Mitten & Obertöne mit Holzcharakter (triangle für Obertöne 2-6)
+          osc.type = (n === 1) ? 'sine' : (n <= 6 ? 'triangle' : 'sine');
           osc.frequency.value = pFreq;
 
           const g = ctx.createGain();
-          const amp = partialAmps[n - 1] * 0.10;
+          // Bei Bassnoten tragen Grundton und Oktave besonders stark das Volumen
+          const pAmp = partialAmps[n - 1] * (isBass && n <= 2 ? 1.35 : 1.0);
+          const amp = pAmp * baseAmpScale;
           g.gain.setValueAtTime(0, startTime);
           g.gain.linearRampToValueAtTime(amp, startTime + 0.004);
-          // Per-Partial Decay: höhere Obertöne sterben schneller
-          const pDecay = decayTime / (1 + n * 0.2);
-          g.gain.setTargetAtTime(amp * 0.3, startTime + 0.05, pDecay * 0.3);
-          g.gain.setTargetAtTime(0.0001, startTime + pDecay, pDecay * 0.18);
+          // Per-Partial Decay: höhere Obertöne sterben schneller, Bass schwingt lang und voll nach
+          const pDecay = noteDecay / (1 + n * (isBass ? 0.15 : 0.22));
+          g.gain.setTargetAtTime(amp * (isBass ? 0.45 : 0.28), startTime + 0.05, pDecay * 0.32);
+          g.gain.setTargetAtTime(0.0001, startTime + pDecay, pDecay * 0.20);
 
           osc.connect(g);
           g.connect(dest);
           osc.start(startTime);
-          osc.stop(startTime + decayTime + 1.5);
+          osc.stop(startTime + noteDecay + 1.5);
         }
-        // Hammer-Noise: Filz-auf-Saite mit Lowpass-Sweep nach unten
-        const nLen = 0.028;
+
+        // Hammer-Noise: Filz-auf-Saite mit Resonanz-Sweep
+        const nLen = isBass ? 0.038 : 0.026;
         const bufSz = Math.ceil(ctx.sampleRate * nLen);
         const nBuf = ctx.createBuffer(1, bufSz, ctx.sampleRate);
         const d = nBuf.getChannelData(0);
@@ -1207,49 +1213,65 @@
         nSrc.buffer = nBuf;
         const lp = ctx.createBiquadFilter();
         lp.type = 'lowpass';
-        lp.frequency.setValueAtTime(3500, startTime);
-        lp.frequency.exponentialRampToValueAtTime(800, startTime + 0.015);
-        lp.Q.value = 3.0; // Holziger Knock
+        lp.frequency.setValueAtTime(isBass ? 2400 : 3600, startTime);
+        lp.frequency.exponentialRampToValueAtTime(isBass ? 400 : 700, startTime + 0.015);
+        lp.Q.value = isBass ? 2.5 : 3.0; // Holziger Knock
         const nG = ctx.createGain();
-        nG.gain.setValueAtTime(0.18, startTime);
-        nG.gain.linearRampToValueAtTime(0.18, startTime + 0.002);
+        const hammerLevel = isBass ? 0.20 : 0.15;
+        nG.gain.setValueAtTime(hammerLevel, startTime);
+        nG.gain.linearRampToValueAtTime(hammerLevel, startTime + 0.002);
         nG.gain.exponentialRampToValueAtTime(0.0001, startTime + nLen);
         nSrc.connect(lp); lp.connect(nG); nG.connect(dest);
         nSrc.start(startTime); nSrc.stop(startTime + nLen + 0.01);
       },
 
-      // Shared Filterkette: Filz → Brillanz → Soundboard → Rumble-Cut → Master (mit Transpositionsanpassung)
+      // Shared Filterkette: Filz → Brillanz → Soundboard → Basswärme → Sub-Cut → Master
       _createGrandChain(ctx, now, decayTime, feltClose, shiftFactor = 1.0) {
         const master = ctx.createGain();
-        master.gain.setValueAtTime(0.70, now);
-        master.gain.setTargetAtTime(0.001, now + decayTime * 1.1, decayTime * 0.22);
+        master.gain.setValueAtTime(0.75, now);
+        master.gain.setTargetAtTime(0.001, now + decayTime * 1.2, decayTime * 0.24);
         master.connect(this.masterGain);
 
-        // Sub-Rumble entfernen
+        // Sub-Rumble entfernen (< 30 Hz)
         const hp = ctx.createBiquadFilter();
-        hp.type = 'highpass'; hp.frequency.value = Math.max(30, 45 * shiftFactor); hp.Q.value = 0.7;
+        hp.type = 'highpass'; hp.frequency.value = Math.max(25, 32 * shiftFactor); hp.Q.value = 0.7;
         hp.connect(master);
 
-        // Soundboard-Resonanz (skaliert dynamisch mit Transposition)
+        // Tiefes Resonanzvolumen des Flügels (~100-140 Hz)
+        const bassWarmth = ctx.createBiquadFilter();
+        bassWarmth.type = 'peaking';
+        bassWarmth.frequency.value = 110 * shiftFactor; bassWarmth.Q.value = 1.2; bassWarmth.gain.value = 4.5;
+        bassWarmth.connect(hp);
+
+        // Soundboard-Resonanz (Holzkörper 260 Hz)
         const body = ctx.createBiquadFilter();
         body.type = 'peaking';
-        body.frequency.value = 280 * shiftFactor; body.Q.value = 2.5; body.gain.value = 4;
-        body.connect(hp);
+        body.frequency.value = 260 * shiftFactor; body.Q.value = 2.0; body.gain.value = 4;
+        body.connect(bassWarmth);
 
-        // Brillanz/Klarheit (skaliert mit Transposition)
+        // Brillanz/Klarheit (1800 Hz)
         const bite = ctx.createBiquadFilter();
         bite.type = 'peaking';
-        bite.frequency.value = 1800 * shiftFactor; bite.Q.value = 1.5; bite.gain.value = 3;
+        bite.frequency.value = 1800 * shiftFactor; bite.Q.value = 1.5; bite.gain.value = 2.5;
         bite.connect(body);
 
         // Filz-Dämpfung: öffnet beim Attack, schließt sich natürlich
         const felt = ctx.createBiquadFilter();
         felt.type = 'lowpass'; felt.Q.value = 1.0;
-        felt.frequency.setValueAtTime(Math.min(10000, 5500 * shiftFactor), now);
-        felt.frequency.setTargetAtTime(Math.max(800, 1600 * shiftFactor), now + feltClose, decayTime * 0.28);
+        felt.frequency.setValueAtTime(Math.min(11000, 5800 * shiftFactor), now);
+        felt.frequency.setTargetAtTime(Math.max(900, 1800 * shiftFactor), now + feltClose, decayTime * 0.30);
         felt.connect(bite);
 
         return felt;
+      },
+
+      playPianoPreview() {
+        if (!this.initialized) this.init();
+        if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume();
+        const prevActive = this.active;
+        this.active = true;
+        this.playPiano('inhale', 2.2);
+        this.active = prevActive;
       },
 
       playPiano(phase, duration) {
@@ -1257,14 +1279,16 @@
         const ctx = this.ctx;
         const now = ctx.currentTime;
         const shiftFactor = Math.pow(2, S.pitchShift / 12);
-        const decayTime = duration * 2.0;
+        const decayTime = duration * 2.2;
 
-        // Am7 (Einatmen, höher) / Gm7 (Ausatmen, tiefer) – Original-Tondifferenz
+        // Volles Konzertflügel-Voicing mit tiefem Bassfundament (A2/G2) & 7 Stimmen
+        // Einatmen: A-Moll9 (A2 Bass + E3 Quinte + A3 + C4 + E4 + G4 + B4)
+        // Ausatmen: G-Moll9 (G2 Bass + D3 Quinte + G3 + Bb3 + D4 + F4 + A4) – exakt 1 Ganzton tiefer!
         const freqs = phase === 'inhale'
-          ? [440.00, 523.25, 659.25, 783.99, 880.00]  // A4-C5-E5-G5-A5
-          : [392.00, 466.16, 587.33, 698.46, 783.99]; // G4-Bb4-D5-F5-G5
+          ? [110.00, 164.81, 220.00, 261.63, 329.63, 392.00, 493.88]
+          : [98.00, 146.83, 196.00, 233.08, 293.66, 349.23, 440.00];
 
-        const dest = this._createGrandChain(ctx, now, decayTime, 0.12, shiftFactor);
+        const dest = this._createGrandChain(ctx, now, decayTime, 0.14, shiftFactor);
         freqs.forEach(f => this._playGrandNote(ctx, f * shiftFactor, now, decayTime, dest));
       },
 
@@ -1273,14 +1297,14 @@
         const ctx = this.ctx;
         const now = ctx.currentTime;
         const shiftFactor = Math.pow(2, S.pitchShift / 12);
-        const decayTime = duration * 2.0;
-        const noteDelay = 0.085;
+        const decayTime = duration * 2.2;
+        const noteDelay = 0.075; // Harfenartiger Konzert-Roll von Bass bis Sopran
 
         const freqs = phase === 'inhale'
-          ? [440.00, 523.25, 659.25, 783.99, 880.00]
-          : [392.00, 466.16, 587.33, 698.46, 783.99];
+          ? [110.00, 164.81, 220.00, 261.63, 329.63, 392.00, 493.88]
+          : [98.00, 146.83, 196.00, 233.08, 293.66, 349.23, 440.00];
 
-        const dest = this._createGrandChain(ctx, now, decayTime, 0.25, shiftFactor);
+        const dest = this._createGrandChain(ctx, now, decayTime, 0.28, shiftFactor);
         freqs.forEach((f, i) => {
           this._playGrandNote(ctx, f * shiftFactor, now + i * noteDelay, decayTime, dest);
         });
@@ -2495,11 +2519,27 @@
     document.getElementById('c-line').addEventListener('input', e => S.cLine = e.target.value);
     document.getElementById('c-hill').addEventListener('input', e => S.cHill = e.target.value);
     document.getElementById('c-sky').addEventListener('input', e => S.cSky = e.target.value);
+    function formatPitchShift(st) {
+      const notes = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+      // Basis: Inhale = Am (A=9), Exhale = Gm (G=7)
+      const inIdx = (9 + st + 24) % 12;
+      const exIdx = (7 + st + 24) % 12;
+      const prefix = st > 0 ? '+' : (st === 0 ? '±' : '');
+      return `${prefix}${st} HT (${notes[inIdx]}m / ${notes[exIdx]}m)`;
+    }
+
+    let pitchPreviewTimer = null;
     document.getElementById('p-pitch').addEventListener('input', e => {
       S.pitchShift = parseInt(e.target.value);
-      const prefix = S.pitchShift > 0 ? '+' : '';
-      document.getElementById('v-pitch').textContent = prefix + S.pitchShift;
+      document.getElementById('v-pitch').textContent = formatPitchShift(S.pitchShift);
+      clearTimeout(pitchPreviewTimer);
+      pitchPreviewTimer = setTimeout(() => {
+        if (S.soundType === 'piano' || S.soundType === 'arpeggio') {
+          Audio.playPianoPreview();
+        }
+      }, 120);
     });
+    document.getElementById('v-pitch').textContent = formatPitchShift(S.pitchShift);
 
     document.getElementById('settings-toggle').addEventListener('click', () => {
       document.getElementById('settings-panel').classList.toggle('open');

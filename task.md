@@ -22,9 +22,10 @@ Hier werden alle anstehenden und erledigten Projektschritte verwaltet.
 - [x] Audio- und Synthese-Überarbeitungen:
   - [x] Sinus-Sound: Reset in `setActive` korrigiert
   - [x] Cello-Sound: Tiefpassfilter von 650 Hz auf 1800 Hz geöffnet für wärmeren, lebendigeren Klang
-  - [x] Flügelton / Arpeggio: 12 Obertöne mit FFT-Amplituden, Obertöne 3–6 mit Triangle-Textur für Körper und Tiefe
-  - [x] Transposition: Filterresonanzen und Dämpfung in `_createGrandChain` dynamisch an `shiftFactor` gekoppelt
-  - [x] Akkord-Tondifferenz: Am7 (Einatmen, hoch) / Gm7 (Ausatmen, tief)
+  - [x] Konzertflügel / Arpeggio: Volles 7-Stimmen-Voicing mit tiefem Bassfundament (A2=110Hz / G2=98Hz), 12 FFT-Obertöne, Bass-Resonanzfilter (+4.5dB bei 110Hz) & langes Sustain
+  - [x] Transposition in Halbtonschritten: Slider (-12 bis +12 HT) mit Tonart-Anzeige (z.B. `±0 HT (Am / Gm)`) und automatischer Live-Vorschau beim Einstellen
+  - [x] Transpositions-Kopplung: Filterresonanzen und Dämpfung in `_createGrandChain` dynamisch an `shiftFactor` gekoppelt
+  - [x] Akkord-Tondifferenz: Exakt 1 Ganzton Abstand (Inhale höher, Exhale tiefer) über alle Stimmen erhalten
 - [x] Visuelle Szenen:
   - [x] Buddha-Szene: Bauchvolumen vergrößert (Grundradius 42, Expansion 38, angepasste Beine & Highlights)
 - [x] Code-Inventur und Stack-Analyse durchgeführt (2026-05-28)
